@@ -456,3 +456,33 @@ def getAbstract(
 
     # Extract the text and return it
     return " ".join(result.split())
+
+@typechecked
+def _print_tags_recursively(element:LxmlElement, indent=0):
+    """
+    Print a human-readable representation of the tags in the XML element recursively.
+
+    Parameters
+    ----------
+    element: xml.Element
+        The XML element to print the tags from.
+    indent: int
+        The indentation level for pretty printing.
+    """
+    print("|-" * indent + f"Tag: {element.tag}: {element.text}")
+    for child in element:
+        _print_tags_recursively(child, indent + 1)
+
+@typechecked
+def pretty_print_xml(xml: LxmlElement) -> None:
+    """
+    Print a human-readable representation of the root tags in the XML response.
+
+    Parameters
+    ----------
+    xml_response: str
+        The XML response as a string.
+    """
+
+    print("Root tags:")
+    _print_tags_recursively(xml)

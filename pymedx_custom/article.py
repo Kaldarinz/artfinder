@@ -20,16 +20,19 @@ class PubMedArticle:
     __slots__ = (
         "abstract",
         "authors",
-        "conclusions",
-        "copyrights",
-        "doi",
+        "ISSN",
         "journal",
-        "keywords",
-        "methods",
+        "volume",
+        "issue",
+        "start_page",
+        "end_page",
+        "doi",
+        "pmid",
+        "pmcid",
         "publication_date",
-        "pubmed_id",
-        "results",
+        "references",
         "title",
+        "keywords",
         "xml",
     )
 
@@ -52,68 +55,66 @@ class PubMedArticle:
             for field in self.__slots__:
                 self.__setattr__(field, kwargs.get(field, None))
 
-    def _extractPubMedId(self, xml_element: _Element) -> Optional[str]:
-        path = ".//PMID"
-        return getContentUnique(element=xml_element, path=path)
+    def _initializeFromXML(self, xml_element: _Element) -> None:
+        """Parse an XML element into an article object."""
+        # Parse the different fields of the article
+        self.xml = xml_element
 
-    def _extractTitle(self, xml_element: _Element) -> Optional[str]:
-        path = ".//ArticleTitle"
-        return getAllContent(element=xml_element, path=path)
+        # MedlineCitation data
+        base = 'MedlineCitation/Article/'
+        self.abstract = getAllContent(element=self.xml, path=base + 'Abstract/AbstractText')
+        self.authors = self._extractAuthors(base)
+        self.ISSN = getAllContent(element=self.xml, path=base + 'Journal/ISSN')
+        self.journal = getAllContent(element=self.xml, path=base + 'Journal/Title')
+        self.volume = getAllContent(element=self.xml, path=base + 'Journal/JournalIssue/Volume')
+        self.issue = getAllContent(element=self.xml, path=base + 'Journal/JournalIssue/Issue')
+        self.start_page = getAllContent(element=self.xml, path=base + 'Pagination/StartPage')
+        self.end_page = getAllContent(element=self.xml, path=base + 'Pagination/EndPage')
+        self.title = getAllContent(element=self.xml, path=base + 'ArticleTitle')
+        
+        # Pubmed data
+        base = 'PubmedData/'
+        self.doi = getAllContent(element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="doi"]')
+        self.pmcid = getAllContent(element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="pmc"]')
+        self.pmid = getAllContent(element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="pubmed"]')
+        self.publication_date = self._extractPublicationDate(base)
 
-    def _extractKeywords(self, xml_element: _Element) -> List[Any]:
-        path = ".//Keyword"
+        # Other data
+        self.keywords = self._extractKeywords()
+
+    def _extractAuthors(self, base_path: str) -> List[dict[str, Optional[str]]]:
+        base_path += 'AuthorList/'
+        return [
+            {
+                "lastname": getContent(author, "./LastName", None),
+                "firstname": getContent(author, "./ForeName", None),
+                "initials": getContent(author, "./Initials", None),
+                "affiliation": getContent(
+                    author, "./AffiliationInfo/Affiliation", None
+                ),
+            }
+            for author in self.xml.findall(base_path + "Author")
+        ]
+
+    def _extractKeywords(self) -> List[Any]:
+        base = 'MedlineCitation/KeywordList/'
         return [
             keyword.text
-            for keyword in xml_element.findall(path)
+            for keyword in self.xml.findall(base)
             if keyword is not None
         ]
 
-    def _extractJournal(self, xml_element: _Element) -> Optional[str]:
-        path = ".//Journal/Title"
-        return getContent(element=xml_element, path=path)
-
-    def _extractAbstract(self, xml_element: _Element) -> Optional[str]:
-        path = ".//AbstractText"
-        abstract = getAbstract(element=xml_element, path=path)
-        return abstract
-
-    def _extractConclusions(self, xml_element: _Element) -> Optional[str]:
-        path = ".//AbstractText[@Label='CONCLUSION']"
-        return getContent(element=xml_element, path=path)
-
-    def _extractMethods(self, xml_element: _Element) -> Optional[str]:
-        path = ".//AbstractText[@Label='METHOD']"
-        return getContent(element=xml_element, path=path)
-
-    def _extractResults(self, xml_element: _Element) -> Optional[str]:
-        path = ".//AbstractText[@Label='RESULTS']"
-        return getContent(element=xml_element, path=path)
-
-    def _extractCopyrights(self, xml_element: _Element) -> Optional[str]:
-        path = ".//CopyrightInformation"
-        return getContent(element=xml_element, path=path)
-
-    def _extractDoi(self, xml_element: _Element) -> Optional[str]:
-        path = ".//ArticleId[@IdType='doi']"
-        return getContentUnique(element=xml_element, path=path)
-
-    def _extractPublicationDate(
-        self, xml_element: _Element
-    ) -> Optional[datetime.date]:
-        # Get the publication date
-
-        # Get the publication elements
-        publication_date = xml_element.find(
-            ".//PubMedPubDate[@PubStatus='pubmed']"
+    def _extractPublicationDate(self, base: str) -> Optional[datetime.date]:
+        publication_date = self.xml.find(
+            base + "History/PubMedPubDate[@PubStatus='accepted']"
         )
         if publication_date is not None:
-            publication_year = getContent(publication_date, ".//Year", None)
+            publication_year = getContent(publication_date, "./Year")
+            publication_month = getContent(publication_date, "./Month")
+            publication_day = getContent(publication_date, "./Day")
 
-            publication_month = getContent(publication_date, ".//Month", "1")
-
-            publication_day = getContent(publication_date, ".//Day", "1")
-
-            # Construct a datetime object from the info
+            if None in [publication_year, publication_month, publication_day]:
+                return None
             date_str: str = (
                 f"{publication_year}/{publication_month}/{publication_day}"
             )
@@ -123,38 +124,29 @@ class PubMedArticle:
         # Unable to parse the datetime
         return None
 
-    def _extractAuthors(
-        self, xml_element: _Element
-    ) -> List[dict[str, Optional[str]]]:
-        return [
-            {
-                "lastname": getContent(author, ".//LastName", None),
-                "firstname": getContent(author, ".//ForeName", None),
-                "initials": getContent(author, ".//Initials", None),
-                "affiliation": getContent(
-                    author, ".//AffiliationInfo/Affiliation", None
-                ),
+
+    def _extractReferences(self, xml_element: _Element) -> List[dict[str, str]]:
+
+        references = []
+        for reference in xml_element.findall(".//Reference"):
+            ref_dict = {
+                'doi': '',
+                'pmid': '',
+                'pmcid': ''
             }
-            for author in xml_element.findall(".//Author")
-        ]
-
-    def _initializeFromXML(self, xml_element: _Element) -> None:
-        """Parse an XML element into an article object."""
-        # Parse the different fields of the article
-        self.pubmed_id = self._extractPubMedId(xml_element)
-        self.title = self._extractTitle(xml_element)
-        self.keywords = self._extractKeywords(xml_element)
-        self.journal = self._extractJournal(xml_element)
-        self.abstract = self._extractAbstract(xml_element) or ""
-        self.conclusions = self._extractConclusions(xml_element)
-        self.methods = self._extractMethods(xml_element)
-        self.results = self._extractResults(xml_element)
-        self.copyrights = self._extractCopyrights(xml_element)
-        self.doi = self._extractDoi(xml_element)
-        self.publication_date = self._extractPublicationDate(xml_element)
-        self.authors = self._extractAuthors(xml_element)
-        self.xml = xml_element
-
+            ids = getContent(reference, './/ArticleId')
+            if ids is None:
+                continue
+            for id in ids:
+                if id.startswith('10.'):
+                    ref_dict['doi'] = id
+                elif id.startswith('PMC'):
+                    ref_dict['pmcid'] = id
+                elif len(id):
+                    ref_dict['pmid'] = id
+            references.append(ref_dict)
+        return references
+    
     def toDict(self) -> Dict[Any, Any]:
         """Convert the parsed information to a Python dict."""
         return {key: self.__getattribute__(key) for key in self.__slots__}

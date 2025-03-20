@@ -15,15 +15,16 @@ import requests
 from lxml import etree as xml
 from typeguard import typechecked
 
-from pymedx.article import PubMedArticle, PubMedCentralArticle
-from pymedx.book import PubMedBookArticle
-from pymedx.helpers import (
+from pymedx_custom.article import PubMedArticle, PubMedCentralArticle
+from pymedx_custom.book import PubMedBookArticle
+from pymedx_custom.helpers import (
     arrange_query,
     batches,
     get_range_date_from_query,
     get_range_months,
     get_range_years,
     get_search_term,
+    pretty_print_xml
 )
 
 logger = logging.getLogger(__name__)
@@ -284,7 +285,8 @@ class PubMed:
                             returend
         """
 
-        parameters = self.parameters.copy()
+        if not parameters:
+            parameters = self.parameters.copy()
         attempt = 0
 
         while self._exceededRateLimit():
@@ -312,7 +314,7 @@ class PubMed:
                     logger.debug(f'Response: {response}')
                     return response
                 else:
-                    logger.debug(f'Response: {response.text}')
+                    logger.debug(f'Response: {response.text[:100]}')
                     return response.text
 
             except Exception as exp:
@@ -802,3 +804,4 @@ class PubMedCentral(PubMed):
         # TODO: Adapt to PubMed Central API
         # for book in root.iter("PubmedBookArticle"):
         #     yield PubMedBookArticle(xml_element=book)
+

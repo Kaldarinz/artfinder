@@ -1,10 +1,2 @@
-!venv/
-venv/*
-!venv/lib/
-venv/lib/*
-!venv/lib/python3.13/
-venv/lib/python3.13/*
-!venv/lib/python3.13/site-packages/
-venv/lib/python3.13/site-packages/*
-!venv/lib/python3.13/site-packages/pymedx/*
+venv/
 */__pycache__/
