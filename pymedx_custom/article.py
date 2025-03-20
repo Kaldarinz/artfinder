@@ -81,17 +81,16 @@ class PubMedArticle:
 
         # Other data
         self.keywords = self._extractKeywords()
+        self.references = self._extractReferences()
 
     def _extractAuthors(self, base_path: str) -> List[dict[str, Optional[str]]]:
         base_path += 'AuthorList/'
         return [
             {
-                "lastname": getContent(author, "./LastName", None),
-                "firstname": getContent(author, "./ForeName", None),
-                "initials": getContent(author, "./Initials", None),
-                "affiliation": getContent(
-                    author, "./AffiliationInfo/Affiliation", None
-                ),
+                "lastname": getContent(author, "./LastName"),
+                "firstname": getContent(author, "./ForeName"),
+                "initials": getContent(author, "./Initials"),
+                "affiliation": getContent(author, "./AffiliationInfo/Affiliation"),
             }
             for author in self.xml.findall(base_path + "Author")
         ]
@@ -124,27 +123,17 @@ class PubMedArticle:
         # Unable to parse the datetime
         return None
 
-
-    def _extractReferences(self, xml_element: _Element) -> List[dict[str, str]]:
+    def _extractReferences(self) -> List[dict[str, str]]:
 
         references = []
-        for reference in xml_element.findall(".//Reference"):
-            ref_dict = {
-                'doi': '',
-                'pmid': '',
-                'pmcid': ''
-            }
-            ids = getContent(reference, './/ArticleId')
-            if ids is None:
-                continue
-            for id in ids:
-                if id.startswith('10.'):
-                    ref_dict['doi'] = id
-                elif id.startswith('PMC'):
-                    ref_dict['pmcid'] = id
-                elif len(id):
-                    ref_dict['pmid'] = id
-            references.append(ref_dict)
+        for reference in self.xml.findall("PubmedData/ReferenceList/Reference"):
+            references.append(
+                {
+                    'doi': getContent(reference, './/ArticleId[@IdType="doi"]', ''),
+                    'pmid': getContent(reference, './/ArticleId[@IdType="pubmed"]', ''),
+                    'pmcid': getContent(reference, './/ArticleId[@IdType="pmc"]', '')
+                }   
+            )
         return references
     
     def toDict(self) -> Dict[Any, Any]:
