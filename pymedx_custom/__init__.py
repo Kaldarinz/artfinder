@@ -1,4 +1,4 @@
-from .api import PubMed, PubMedCentral
+from .api import PubMed
 
 
-__all__ = ["PubMed", "PubMedCentral"]
+__all__ = ["PubMed"]

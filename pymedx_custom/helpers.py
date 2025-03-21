@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 import re
 
-from typing import Generator, Optional, Union, cast
+from typing import Generator, Optional, Union, cast, TypeVar
 from xml.etree.ElementTree import Element as EtreeElement
 
 import lxml.etree
@@ -16,6 +16,7 @@ from typing_extensions import TypeAlias
 
 Element: TypeAlias = Union[LxmlElement, EtreeElement]
 
+T = TypeVar("T", bound=Optional[str])
 
 @typechecked
 def arrange_query(
@@ -289,9 +290,9 @@ def batches(
 def getContent(
     element: Element,
     path: str,
-    default: Optional[str] = None,
+    default: T = None,
     separator: str = "\n",
-) -> Optional[str]:
+) -> T:
     """
     Retrieve text content of an XML element.
 
@@ -317,7 +318,7 @@ def getContent(
         return default
 
     # Extract the text and return it
-    return separator.join([sub.text for sub in result if sub.text is not None])
+    return cast(T, separator.join([sub.text for sub in result if sub.text is not None]))
 
 
 @typechecked

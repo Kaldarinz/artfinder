@@ -15,7 +15,7 @@ import requests
 from lxml import etree as xml
 from typeguard import typechecked
 
-from pymedx_custom.article import PubMedArticle, PubMedCentralArticle
+from pymedx_custom.article import PubMedArticle
 from pymedx_custom.book import PubMedBookArticle
 from pymedx_custom.helpers import (
     arrange_query,
@@ -85,25 +85,13 @@ class PubMed:
     def query(
         self,
         query: str,
-        max_results: int = 100,
-    ) -> Iterator[PubMedArticle | PubMedBookArticle | PubMedCentralArticle]:
+        max_results: int = MAX_RECORDS_PM,
+    ) -> Generator[PubMedArticle]:
         """
-        Execute a query agains the GraphQL schema.
-
-        Automatically inserting the PubMed data loader.
-
-        Parameters
-        ----------
-        query: String
-            the GraphQL query to execute against the schema.
-
-        Returns
-        -------
-        result: ExecutionResult
-            GraphQL object that contains the result in the "data" attribute.
+        Query the PubMed database.
         """
-        # Retrieve the article IDs for the query
 
+        # Get amount of articles that match the query
         total_articles = self.getTotalResultsCount(query)
 
         # check if total articles is greater than MAX_RECORDS_PM
@@ -117,34 +105,14 @@ class PubMed:
             )
 
         # Get the articles themselves
-        articles = list(
-            [
-                self._getArticles(article_ids=batch)
-                for batch in batches(article_ids, 250)
-            ]
-        )
-
-        # Chain the batches back together and return the list
-        return itertools.chain.from_iterable(articles)
+        for batch in batches(article_ids, 250):
+            yield from self._getArticles(article_ids=batch)
 
     def getCitingArticles(
         self, pmid: str, max_results: int = 100
-    ) -> list[PubMedArticle | PubMedBookArticle | PubMedCentralArticle]:
+    ) -> Generator[PubMedArticle]:
         """
         Return the articles that cite the given article.
-
-        Parameters
-        ----------
-        pmid: String
-            the PubMed ID of the article.
-
-        max_results: Int
-            the maximum number of results to retrieve.
-
-        Returns
-        -------
-        citing_articles: List
-            the articles that cite the given article.
         """
 
         citing_article_ids = self._getCitingArticlesIDs(pmid)
@@ -158,12 +126,8 @@ class PubMed:
             )
 
         # Get the articles themselves
-        articles = []
         for batch in batches(citing_article_ids, 250):
-            articles.extend(self._getArticlesList(article_ids=batch))
-
-        # Chain the batches back together and return the list
-        return articles
+            yield from self._getArticles(article_ids=batch)
 
     def getCitingArticlesCount(self, pmid: str) -> int:
         """
@@ -184,27 +148,17 @@ class PubMed:
 
     def getTotalResultsCount(self, query: str) -> int:
         """
-        Return the total number of results that match the query.
-
-        Parameters
-        ----------
-        query: String
-            the query to send to PubMed
-
-        Returns
-        -------
-        total_results_count: Int
-            total number of results for the query in PubMed
+        Return the total number of results for a query.
         """
+
         # Get the default parameters
         parameters = self.parameters.copy()
 
         # Add specific query parameters
         parameters["term"] = query
-        # Total number of UIDs from the retrieved set to be shown in the XML output.
+        # We are interested only in the amount of articles.
         # from https://www.ncbi.nlm.nih.gov/books/NBK25499/#chapter4.ESearch
-        parameters["retmax"] = 1
-
+        parameters["rettype"] = "count"
         # Make the request (request a single article ID for this search)
         response = cast(
             Dict[str, Any],
@@ -304,17 +258,15 @@ class PubMed:
                 response = requests.get(f"{BASE_URL}{url}", timeout=TIMEOUT, params=parameters)
                 # Check for any errors
                 response.raise_for_status()
+                logger.debug(f'Response status code: {response.status_code}')
 
                 # Add this request to the list of requests made
                 self._requestsMade.append(datetime.datetime.now())
 
                 # Return the response
                 if output == "json":
-                    response = cast(Dict[str, Any], response.json())
-                    logger.debug(f'Response: {response}')
-                    return response
+                    return cast(Dict[str, Any], response.json())
                 else:
-                    logger.debug(f'Response: {response.text[:100]}')
                     return response.text
 
             except Exception as exp:
@@ -398,18 +350,9 @@ class PubMed:
 
     def _getArticles(
         self, article_ids: list[str]
-    ) -> Generator[
-        PubMedArticle | PubMedBookArticle | PubMedCentralArticle, None, None
-    ]:
-        """Batch a list of article IDs and retrieves the content.
-
-        Parameters
-        ----------
-            - article_ids   List, article IDs.
-
-        Returns
-        -------
-            - articles      List, article objects.
+    ) -> Generator[PubMedArticle]:
+        """
+        Retrieve articles from PubMed.
         """
         # Get the default parameters
         parameters = self.parameters.copy()
@@ -428,11 +371,15 @@ class PubMed:
         # Parse as XML
         root = xml.fromstring(response)
 
+        unknown_article_counter = 0
         # Loop over the articles and construct article objects
-        for article in root.iter("PubmedArticle"):
-            yield PubMedArticle(xml_element=article)
-        for book in root.iter("PubmedBookArticle"):
-            yield PubMedBookArticle(xml_element=book)
+        for article in root.iterchildren():
+            if article.tag == "PubmedArticle":
+                yield PubMedArticle(xml_element=article)
+            else:
+                unknown_article_counter += 1
+        if unknown_article_counter > 0:
+            logger.info(f"Unrecognized articles: {unknown_article_counter}")
 
     def _getArticleIds(
         self,
@@ -566,242 +513,3 @@ class PubMed:
 
         # Return the number of citing articles
         return citing_articles_ids
-
-    def _getArticlesList(
-        self, article_ids: list[str]
-    ) -> list[PubMedArticle | PubMedBookArticle | PubMedCentralArticle | None]:
-        """Batch a list of article IDs and retrieves the content.
-
-        Parameters
-        ----------
-            - article_ids   List, article IDs.
-
-        Returns
-        -------
-            - articles      List, article objects.
-        """
-        # Get the default parameters
-        parameters = self.parameters.copy()
-        parameters["id"] = article_ids
-
-        # Make the request
-        response = cast(
-            str,
-            self._get(
-                url="/entrez/eutils/efetch.fcgi",
-                parameters=parameters,
-                output="xml",
-            ),
-        )
-
-        # Parse as XML
-        root = xml.fromstring(response)
-        articles = []
-        # Loop over the articles and construct article objects
-        for article in root.iter("PubmedArticle"):
-            articles.append(PubMedArticle(xml_element=article))
-        for book in root.iter("PubmedBookArticle"):
-            articles.append(PubMedBookArticle(xml_element=book))
-        return articles
-
-
-@typechecked
-class PubMedCentral(PubMed):
-    """Warp around the PubMedCentral API."""
-
-    def __init__(
-        self,
-        tool: str = "my_tool",
-        email: str = "my_email@example.com",
-        api_key: str = "",
-    ) -> None:
-        """
-        Initialize the PubMedCentral object.
-
-        Parameters
-        ----------
-        tool: String
-            name of the tool that is executing the query.
-            This parameter is not required but kindly requested by
-            PMC (PubMed Central).
-        email: String
-            email of the user of the tool. This parameter
-            is not required but kindly requested by PMC (PubMed Central).
-        api_key: str
-            the NCBI API KEY
-
-        Returns
-        -------
-        None
-        """
-        # Inherits from PubMed object and initialize.
-        super().__init__(tool, email, api_key)
-        # Changes database source to pmc (PubMedCentral)
-        self.parameters["db"] = "pmc"
-
-    def query(
-        self,
-        query: str,
-        max_results: int = 100,
-    ) -> Iterator[PubMedArticle | PubMedBookArticle | PubMedCentralArticle]:
-        """
-        Execute a query agains the GraphQL schema.
-
-        Automatically inserting the PubMed data loader.
-
-        Parameters
-        ----------
-        query: String
-            the GraphQL query to execute against the schema.
-
-        Returns
-        -------
-        result: ExecutionResult
-            GraphQL object that contains the result in the "data" attribute.
-        """
-        # Retrieve the article IDs for the query
-        article_ids = self._getArticleIds(
-            query=query,
-            max_results=max_results,
-        )
-
-        # Get the articles themselves
-        articles = list(
-            [
-                self._getArticles(article_ids=batch)
-                for batch in batches(article_ids, 250)
-            ]
-        )
-
-        # Chain the batches back together and return the list
-        return itertools.chain.from_iterable(articles)
-
-    def _getArticleIds(
-        self,
-        query: str,
-        max_results: int,
-    ) -> list[str]:
-        """Retrieve the article IDs for a query.
-
-        Parameters
-        ----------
-        query: Str
-            query to be executed against the PubMed database.
-        max_results: Int
-            the maximum number of results to retrieve.
-
-        Returns
-        -------
-        article_ids: List
-            article IDs as a list.
-        """
-        # Create a placeholder for the retrieved IDs
-        article_ids = []
-
-        # Get the default parameters
-        parameters = self.parameters.copy()
-
-        # Add specific query parameters
-        parameters["term"] = query
-        parameters["retmax"] = 500000
-        parameters["datetype"] = "edat"
-
-        retmax: int = cast(int, parameters["retmax"])
-
-        # Calculate a cut off point based on the max_results parameter
-        if max_results < retmax:
-            parameters["retmax"] = max_results
-
-        # Make the first request to PubMed
-        response = cast(
-            Dict[str, Any],
-            self._get(
-                url="/entrez/eutils/esearch.fcgi",
-                parameters=parameters,
-                output="json",
-            ),
-        )
-
-        # Add the retrieved IDs to the list
-        article_ids += response.get("esearchresult", {}).get("idlist", [])
-
-        # Get information from the response
-        total_result_count = int(response.get("esearchresult", {}).get("count"))
-        retrieved_count = int(response.get("esearchresult", {}).get("retmax"))
-
-        # If no max is provided (-1) we'll try to retrieve everything
-        if max_results == -1:
-            max_results = total_result_count
-
-        # If not all articles are retrieved, continue to make requests until
-        # we have everything
-        while retrieved_count < total_result_count and retrieved_count < max_results:
-            # Calculate a cut off point based on the max_results parameter
-            if (max_results - retrieved_count) < cast(int, parameters["retmax"]):
-                parameters["retmax"] = max_results - retrieved_count
-
-            # Start the collection from the number of already retrieved
-            # articles
-            parameters["retstart"] = retrieved_count
-
-            # Make a new request
-            response = cast(
-                Dict[str, Any],
-                self._get(
-                    url="/entrez/eutils/esearch.fcgi",
-                    parameters=parameters,
-                    output="json",
-                ),
-            )
-
-            # Add the retrieved IDs to the list
-            article_ids += response.get("esearchresult", {}).get("idlist", [])
-
-            # Get information from the response
-            retrieved_count += int(response.get("esearchresult", {}).get("retmax"))
-
-        # Return the response
-        return article_ids
-
-    def _getArticles(
-        self, article_ids: list[str]
-    ) -> Generator[
-        PubMedArticle | PubMedBookArticle | PubMedCentralArticle, None, None
-    ]:
-        """Batch a list of article IDs and retrieves the content.
-
-        Parameters
-        ----------
-        article_ids: List
-            article IDs.
-
-        Returns
-        -------
-        articles: List
-            article objects.
-        """
-        # Get the default parameters
-        parameters = self.parameters.copy()
-        parameters["id"] = article_ids
-
-        # Make the request
-        response = cast(
-            str,
-            self._get(
-                url="/entrez/eutils/efetch.fcgi",
-                parameters=parameters,
-                output="xml",
-            ),
-        )
-
-        # Parse as XML
-        root = xml.fromstring(response)
-
-        # Loop over the articles and construct article objects
-        for article in root.iter("article"):
-            yield PubMedCentralArticle(xml_element=article)
-
-        # TODO: Adapt to PubMed Central API
-        # for book in root.iter("PubmedBookArticle"):
-        #     yield PubMedBookArticle(xml_element=book)
-
