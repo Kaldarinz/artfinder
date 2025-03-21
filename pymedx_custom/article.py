@@ -96,13 +96,14 @@ class PubMedArticle:
             for author in self.xml.findall(base_path + "Author")
         ]
 
-    def _extractKeywords(self) -> List[Any]:
+    def _extractKeywords(self) -> List[str]|None:
         base = 'MedlineCitation/KeywordList/'
-        return [
+        result = [
             keyword.text
             for keyword in self.xml.findall(base)
-            if keyword is not None
+            if (keyword is not None and keyword.text is not None)
         ]
+        return result if result else None
 
     def _extractPublicationDate(self, base: str) -> Optional[datetime.date]:
         publication_date = self.xml.find(
@@ -111,8 +112,8 @@ class PubMedArticle:
         # First try to get the publication date from the ArticleDate tag
         if publication_date is not None:
             publication_year = getContent(publication_date, "./Year")
-            publication_month = getContent(publication_date, "./Month", "01")
-            publication_day = getContent(publication_date, "./Day", "01")
+            publication_month = str(getContent(publication_date, "./Month", "01"))
+            publication_day = str(getContent(publication_date, "./Day", "01"))
 
             if None in [publication_year, publication_month, publication_day]:
                 return None
@@ -148,7 +149,7 @@ class PubMedArticle:
             return datetime.datetime.strptime(date_str, "%Y/%b/%d")
         return None
 
-    def _extractReferences(self) -> List[dict[str, str]]:
+    def _extractReferences(self) -> List[dict[str, str]]|None:
 
         references = []
         for reference in self.xml.findall("PubmedData/ReferenceList/Reference"):
@@ -159,7 +160,7 @@ class PubMedArticle:
                     'pmcid': getContent(reference, './/ArticleId[@IdType="pmc"]', '')
                 }   
             )
-        return references
+        return references if references else None
     
     def toDict(self) -> Dict[Any, Any]:
         """Convert the parsed information to a Python dict."""

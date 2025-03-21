@@ -94,6 +94,7 @@ class PubMed:
         # Get amount of articles that match the query
         total_articles = self.getTotalResultsCount(query)
 
+        logger.info(f"Found: {total_articles} articles. Fetching...")
         # check if total articles is greater than MAX_RECORDS_PM
         # and check if the user requests more than MAX_RECORDS_PM
         if total_articles > MAX_RECORDS_PM and max_results > MAX_RECORDS_PM:
@@ -108,23 +109,32 @@ class PubMed:
         for batch in batches(article_ids, 250):
             yield from self._getArticles(article_ids=batch)
 
+    def getArticles(self, article_ids: list[str]) -> Generator[PubMedArticle]:
+        """
+        Retrieve articles from PubMed.
+        """
+        for batch in batches(article_ids, 250):
+            yield from self._getArticles(article_ids=batch)
+
     def getCitingArticles(
-        self, pmid: str, max_results: int = 100
+        self, pmid: str|int|None=None, doi: str|None=None, max_results: int = MAX_RECORDS_PM
     ) -> Generator[PubMedArticle]:
         """
         Return the articles that cite the given article.
         """
 
-        citing_article_ids = self._getCitingArticlesIDs(pmid)
+        if pmid is None:
+            raise NotImplementedError("Citing articles search is only supported for pmid")
+        citing_article_ids = self._getCitingArticlesIDs(str(pmid), doi)
         total_citing_articles = len(citing_article_ids)
-
+        logger.info(f"Found: {total_citing_articles} siting articles. Fetching...")
         # Check if the total number of citing articles is greater than MAX_RECORDS_PM
         # and check if the user requests more than MAX_RECORDS_PM
         if total_citing_articles > MAX_RECORDS_PM and max_results > MAX_RECORDS_PM:
             raise NotImplementedError(
                 "Large citing articles count is not supported yet"
             )
-
+        
         # Get the articles themselves
         for batch in batches(citing_article_ids, 250):
             yield from self._getArticles(article_ids=batch)
@@ -368,8 +378,13 @@ class PubMed:
             ),
         )
 
-        # Parse as XML
-        root = xml.fromstring(response)
+        # Parsing may fail if XML conatins encoding prolog.
+        # We just ignore such responses and do not parse them.
+        try:
+            root = xml.fromstring(response)
+        except ValueError:
+            logger.warning("Failed to parse XML response")
+            return
 
         unknown_article_counter = 0
         # Loop over the articles and construct article objects
@@ -431,8 +446,8 @@ class PubMed:
         article_ids += response.get("esearchresult", {}).get("idlist", [])
 
         # Get information from the response
-        total_result_count = int(response.get("esearchresult", {}).get("count"))
-        retrieved_count = int(response.get("esearchresult", {}).get("retmax"))
+        total_result_count = int(response.get("esearchresult", {}).get("count", 0))
+        retrieved_count = int(response.get("esearchresult", {}).get("retmax", 0))
 
         # If no max is provided (-1) we'll try to retrieve everything
         if max_results == -1:
@@ -468,19 +483,9 @@ class PubMed:
         # Return the response
         return article_ids
 
-    def _getCitingArticlesIDs(self, pmid: str) -> list[str]:
+    def _getCitingArticlesIDs(self, pmid: str|None=None, doi: str|None=None) -> list[str]:
         """
         Return the IDs of the articles that cite the given article.
-
-        Parameters
-        ----------
-        pmid: String
-            the PubMed ID of the article.
-
-        Returns
-        -------
-        citing_articles_ids: List
-            the IDs of the articles that cite the given article.
         """
 
         # Get the default parameters
@@ -492,7 +497,10 @@ class PubMed:
         # Add specific query parameters
         parameters["dbfrom"] = "pubmed"
         parameters["linkname"] = "pubmed_pubmed_citedin"
-        parameters["id"] = pmid
+        if pmid:
+            parameters["id"] = pmid
+        elif doi:
+            parameters["doi"] = doi
 
         # Make the request
         response = cast(
