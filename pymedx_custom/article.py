@@ -121,8 +121,10 @@ class PubMedArticle:
                 f"{publication_year}/{publication_month}/{publication_day}"
             )
 
-            return datetime.datetime.strptime(date_str, "%Y/%m/%d")
-
+            try:
+                return datetime.datetime.strptime(date_str, "%Y/%m/%d")
+            except:
+                return None
         # If the ArticleDate tag is not present, try to get the publication date from the PubDate tag
         elif (publication_Date:=self.xml.find(base + "Journal/JournalIssue/PubDate")) is not None:
             # Try to get the publication date from the PubDate tag
