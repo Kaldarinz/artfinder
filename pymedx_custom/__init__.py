@@ -1,4 +1,4 @@
 from .api import PubMed
-from .article import PubMedArticle
+from .article import PubMedArticle, CrossrefArticle
 
-__all__ = ["PubMed", "PubMedArticle"]
+__all__ = ["PubMed", "PubMedArticle", "CrossrefArticle"]

@@ -1,6 +1,5 @@
-import datetime
+from pymedx_custom import CrossrefArticle
 
-dt = datetime.datetime.strptime("2020/Dec/15", "%Y/%b/%d")
+art = CrossrefArticle({})
 
-print(dt)
-
+print(art.to_dict())

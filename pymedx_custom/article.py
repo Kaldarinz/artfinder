@@ -4,49 +4,74 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 
 from typing import Any, Dict, List, Optional, cast
 
 from lxml.etree import _Element
 from typeguard import typechecked
 
-from .helpers import getAbstract, getAllContent, getContent, getContentUnique
+from .helpers import getAllContent, getContent, getContentUnique
 
 
 @typechecked
-class PubMedArticle:
-    """Data class that contains a PubMed article."""
+class Article:
+    """Base class for all articles."""
 
     __slots__ = (
-        "abstract",
         "authors",
-        "ISSN",
+        "abstract",
+        "title",
+        "doi",
+        "type",
         "journal",
+        "issn",
         "volume",
         "issue",
         "start_page",
         "end_page",
-        "doi",
-        "pmid",
-        "pmcid",
         "publication_date",
         "references",
-        "title",
-        "keywords",
-        "type",
-        "xml",
     )
 
-    def __init__(
-        self,
-        xml_element: Optional[_Element] = None,
-        *args: List[Any],
-        **kwargs: Dict[Any, Any],
-    ) -> None:
+    def to_dict(self) -> Dict[Any, Any]:
+        """Convert the parsed information to a Python dict."""
+        return {key: self.__getattribute__(key) for key in self.get_all_slots()}
+
+    @classmethod
+    def get_all_slots(cls):
+        """
+        Get all __slots__ of a class, including inherited ones.
+
+        Parameters
+        ----------
+        cls : type
+            The class to inspect.
+
+        Returns
+        -------
+        list
+            A list of all __slots__ defined in the class and its superclasses.
+        """
+        slots = []
+        for base in cls.__mro__:  # Traverse the Method Resolution Order (MRO)
+            if hasattr(base, "__slots__"):
+                slots.extend(base.__slots__)
+        return slots
+
+@typechecked
+class PubMedArticle(Article):
+    """Data class that contains a PubMed article."""
+
+    __slots__ = (
+        "pmid",
+        "pmcid",
+        "keywords",
+    )
+
+    def __init__(self, xml_element: Optional[_Element] = None, **kwargs: Any) -> None:
         """Initialize of the object from XML or from parameters."""
-        if args:
-            # keep it for resolving problems with linter
-            pass
+
         # If an XML element is provided, use it for initialization
         if xml_element is not None:
             self._initializeFromXML(xml_element=xml_element)
@@ -61,43 +86,63 @@ class PubMedArticle:
         # Parse the different fields of the article
         self.xml = xml_element
         # MedlineCitation data
-        base = 'MedlineCitation/Article/'
-        self.abstract = getAllContent(element=self.xml, path=base + 'Abstract/AbstractText')
-        self.ISSN = getAllContent(element=self.xml, path=base + 'Journal/ISSN')
-        self.journal = getAllContent(element=self.xml, path=base + 'Journal/Title')
-        self.volume = getAllContent(element=self.xml, path=base + 'Journal/JournalIssue/Volume')
-        self.issue = getAllContent(element=self.xml, path=base + 'Journal/JournalIssue/Issue')
-        self.start_page = getAllContent(element=self.xml, path=base + 'Pagination/StartPage')
-        self.end_page = getAllContent(element=self.xml, path=base + 'Pagination/EndPage')
-        self.title = getAllContent(element=self.xml, path=base + 'ArticleTitle')
-        self.type = getAllContent(element=self.xml, path=base + 'PublicationTypeList/PublicationType')
+        base = "MedlineCitation/Article/"
+        self.abstract = getAllContent(
+            element=self.xml, path=base + "Abstract/AbstractText"
+        )
+        self.ISSN = getAllContent(element=self.xml, path=base + "Journal/ISSN")
+        self.journal = getAllContent(element=self.xml, path=base + "Journal/Title")
+        self.volume = getAllContent(
+            element=self.xml, path=base + "Journal/JournalIssue/Volume"
+        )
+        self.issue = getAllContent(
+            element=self.xml, path=base + "Journal/JournalIssue/Issue"
+        )
+        self.start_page = getAllContent(
+            element=self.xml, path=base + "Pagination/StartPage"
+        )
+        self.end_page = getAllContent(
+            element=self.xml, path=base + "Pagination/EndPage"
+        )
+        self.title = getAllContent(element=self.xml, path=base + "ArticleTitle")
+        self.type = getAllContent(
+            element=self.xml, path=base + "PublicationTypeList/PublicationType"
+        )
+        if self.type == "Journal Article":
+            self.type = "article-journal"
         self.authors = self._extractAuthors(base)
         self.publication_date = self._extractPublicationDate(base)
-        
+
         # Pubmed data
-        base = 'PubmedData/'
-        self.doi = getAllContent(element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="doi"]')
-        self.pmcid = getAllContent(element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="pmc"]')
-        self.pmid = getAllContent(element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="pubmed"]')
+        base = "PubmedData/"
+        self.doi = getAllContent(
+            element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="doi"]'
+        )
+        self.pmcid = getAllContent(
+            element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="pmc"]'
+        )
+        self.pmid = getAllContent(
+            element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="pubmed"]'
+        )
 
         # Other data
         self.keywords = self._extractKeywords()
         self.references = self._extractReferences()
 
     def _extractAuthors(self, base_path: str) -> List[dict[str, Optional[str]]]:
-        base_path += 'AuthorList/'
+        base_path += "AuthorList/"
         return [
             {
                 "lastname": getContent(author, "./LastName"),
-                "firstname": getContent(author, "./ForeName"),
-                "initials": getContent(author, "./Initials"),
+                "firstname": getContent(author, "./ForeName", "")
+                + getContent(author, "./Initials", ""),
                 "affiliation": getContent(author, "./AffiliationInfo/Affiliation"),
             }
             for author in self.xml.findall(base_path + "Author")
         ]
 
-    def _extractKeywords(self) -> List[str]|None:
-        base = 'MedlineCitation/KeywordList/'
+    def _extractKeywords(self) -> List[str] | None:
+        base = "MedlineCitation/KeywordList/"
         result = [
             keyword.text
             for keyword in self.xml.findall(base)
@@ -106,67 +151,61 @@ class PubMedArticle:
         return result if result else None
 
     def _extractPublicationDate(self, base: str) -> Optional[datetime.date]:
-        publication_date = self.xml.find(
-            base + "ArticleDate"
-        )
+        publication_date = self.xml.find(base + "ArticleDate")
         # First try to get the publication date from the ArticleDate tag
         if publication_date is not None:
-            publication_year = getContent(publication_date, "./Year")
-            publication_month = str(getContent(publication_date, "./Month", "01"))
-            publication_day = str(getContent(publication_date, "./Day", "01"))
+            year = getContent(publication_date, "./Year")
+            month = str(getContent(publication_date, "./Month", "01"))
+            day = str(getContent(publication_date, "./Day", "01"))
 
-            if None in [publication_year, publication_month, publication_day]:
-                return None
-            date_str: str = (
-                f"{publication_year}/{publication_month}/{publication_day}"
-            )
-
-            try:
-                return datetime.datetime.strptime(date_str, "%Y/%m/%d")
-            except:
-                return None
+            if year is not None:
+                return datetime.date(int(year), int(month), int(day))
         # If the ArticleDate tag is not present, try to get the publication date from the PubDate tag
-        elif (publication_Date:=self.xml.find(base + "Journal/JournalIssue/PubDate")) is not None:
+        elif (
+            publication_Date := self.xml.find(base + "Journal/JournalIssue/PubDate")
+        ) is not None:
             # Try to get the publication date from the PubDate tag
-            publication_year = getContent(publication_Date, "./Year")
-            publication_month = getContent(publication_Date, "./Month", "Jan")
-            publication_day = getContent(publication_Date, "./Day", "01")
+
+            month_abbr_to_num = {
+                "Jan": 1,
+                "Feb": 2,
+                "Mar": 3,
+                "Apr": 4,
+                "May": 5,
+                "Jun": 6,
+                "Jul": 7,
+                "Aug": 8,
+                "Sep": 9,
+                "Oct": 10,
+                "Nov": 11,
+                "Dec": 12,
+            }
+            year = getContent(publication_Date, "./Year")
+            month_abbr = getContent(publication_Date, "./Month", "Jan")
+            day = getContent(publication_Date, "./Day", "01")
 
             # Date can have alternative MedlineDate format
-            if publication_year is None:
+            if year is None:
                 date = getContentUnique(publication_Date, "./MedlineDate")
                 if date is not None:
                     date = date.split(" ")
-                    publication_year = date[0]
-                    publication_month = date[1] if len(date) > 1 else "Jan"
+                    year = date[0]
+                    month_abbr = date[1] if len(date) > 1 else "Jan"
                     if len(date) > 2:
-                        publication_day = date[2].split('-')[0]
+                        day = date[2].split("-")[0]
                     else:
-                        publication_day = "01"
+                        day = "01"
                 else:
                     return None
+            month = month_abbr_to_num[month_abbr]
+            return datetime.date(int(year), month, int(day))
 
-            date_str = '/'.join([publication_year, publication_month, publication_day])
-
-            return datetime.datetime.strptime(date_str, "%Y/%b/%d")
-        return None
-
-    def _extractReferences(self) -> List[dict[str, str]]|None:
+    def _extractReferences(self) -> List[str] | None:
 
         references = []
         for reference in self.xml.findall("PubmedData/ReferenceList/Reference"):
-            references.append(
-                {
-                    'doi': getContent(reference, './/ArticleId[@IdType="doi"]', ''),
-                    'pmid': getContent(reference, './/ArticleId[@IdType="pubmed"]', ''),
-                    'pmcid': getContent(reference, './/ArticleId[@IdType="pmc"]', '')
-                }   
-            )
+            references.append(getContent(reference, './/ArticleId[@IdType="doi"]', ""))
         return references if references else None
-    
-    def toDict(self) -> Dict[Any, Any]:
-        """Convert the parsed information to a Python dict."""
-        return {key: self.__getattribute__(key) for key in self.__slots__ if key != 'xml'}
 
     def toJSON(self) -> str:
         """Dump the object as JSON string."""
@@ -177,8 +216,138 @@ class PubMedArticle:
                     if not isinstance(value, (datetime.date, _Element))
                     else str(value)
                 )
-                for key, value in self.toDict().items()
+                for key, value in self.to_dict().items()
             },
             sort_keys=True,
             indent=4,
         )
+
+
+@typechecked
+class CrossrefArticle(Article):
+    """Data class that contains a Crossref article."""
+
+    __slots__ = (
+        "publisher",
+        "license",
+        "is_referenced_by_count",
+        "link",
+    )
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        """
+        Initialize the object from a dictionary, returned by the Crossref API query.
+        """
+
+        super().__init__()
+        self._extract_data(data)
+
+    def _extract_data(self, data: dict[str, Any]) -> None:
+        """Extract the data from the dictionary."""
+
+        # some values can be directly assigned
+        accept_fields = [
+            "publisher",
+            "issue",
+            "license",
+            "type",
+            "volume",
+            "link",
+        ]
+        for field in accept_fields:
+            setattr(self, field, data.get(field, None))
+
+        # others require processing
+        self.title = self._extract_title(data)
+        self.authors = self._extract_authors(data)
+        self.is_referenced_by_count = data.get("is-referenced-by-count", None)
+        self.journal = data.get("container-title", [None])[0]
+        self.issn = self._extract_issn(data)
+        self.start_page, self.end_page = self._extract_pages(data)
+        self.references = self._extract_references(data)
+        self.publication_date = self._extrac_date(data)
+        self.abstract = self._extract_abstract(data)
+        self.doi = data.get("DOI", None)
+
+    def _extract_title(self, data: dict[str, Any]) -> str:
+        """Extract the title from the data."""
+        return data.get("title", [""])[0]
+
+    def _extract_authors(self, data: dict[str, Any]) -> List[dict[str, str | None]]:
+        """Extract the authors from the data."""
+
+        authors_list = data.get("author", [])
+        for i in range(len(authors_list)):
+            author = authors_list[i]
+            author_new = {}
+            if author.get('family'):
+                author_new["lastname"] = author.get("family")
+            else:
+                author_new["lastname"] = author.get("lastname")
+            if author.get("given"):
+                author_new["firstname"] = author.get("given")
+            else:
+                author_new["firstname"] = author.get("firstname")
+            affiliation = author.get("affiliation")
+            if isinstance(affiliation, dict):
+                author_new["affiliation"] = affiliation.get("name")
+            else:
+                author_new["affiliation"] = None
+            authors_list[i] = author_new
+        return authors_list
+
+    def _extract_issn(self, data: dict[str, Any]) -> str | None:
+        """Extract the ISSN from the data."""
+
+        issn_list = data.get("issn-type", [])
+        # get issn value in the following order: electronic, print
+        for issn in issn_list:
+            if issn.get("type") == "electronic":
+                return issn.get("value")
+        for issn in issn_list:
+            if issn.get("type") == "print":
+                return issn.get("value")
+        return None
+
+    def _extract_pages(self, data: dict[str, Any]) -> tuple[str | None, str | None]:
+        """Extract the start and end pages from the data."""
+        page = data.get("page", None)
+        if page:
+            pages = tuple(page.split("-"))
+            if len(pages) == 2:
+                return pages
+            return pages[0], None
+        return None, None
+
+    def _extract_references(self, data: dict[str, Any]) -> List[str] | None:
+        """Extract the references from the data."""
+        references = data.get("reference", None)
+        ref_list = [reference.get("DOI") for reference in references if reference.get("DOI")] if references else []
+        return ref_list if len(ref_list) else None
+
+    def _extrac_date(self, data: dict[str, Any]) -> datetime.date | None:
+        """Extract the publication date from the data."""
+        date = data.get("published", {}).get("date-parts", [[]])[0]
+        if date:
+            year = date[0]
+            if len(date) > 1:
+                month = date[1]
+            else:
+                month = 1
+            if len(date) > 2:
+                day = date[2]
+            else:
+                day = 1
+            return datetime.date(year, month, day)
+
+    def _extract_abstract(self, data: dict[str, Any]) -> str | None:
+        """Extract the abstract from the data."""
+        
+        raw_abstract = data.get("abstract")
+        if raw_abstract is not None:
+            raw_abstract = re.sub(r'<jats:title>.*</jats:title>', '', raw_abstract)
+            raw_abstract = re.sub(r'<[^>]+>', '', raw_abstract).strip()
+            if len(raw_abstract) > 1:
+                return raw_abstract
+
+            
