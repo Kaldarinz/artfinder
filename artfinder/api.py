@@ -1,23 +1,21 @@
-"""API module for PubMed."""
+"""API module."""
 
 from __future__ import annotations
 
 import datetime
-import itertools
 import random
 import time
 import logging
 
-from typing import Any, Dict, Generator, Iterator, cast
+from typing import Any, Dict, Generator, cast
 
 import requests
-
+from crossref.restful import Works
 from lxml import etree as xml
 from typeguard import typechecked
 
-from pymedx_custom.article import PubMedArticle
-from pymedx_custom.book import PubMedBookArticle
-from pymedx_custom.helpers import (
+from artfinder.article import PubMedArticle
+from artfinder.helpers import (
     arrange_query,
     batches,
     get_range_date_from_query,
@@ -521,3 +519,27 @@ class PubMed:
 
         # Return the number of citing articles
         return citing_articles_ids
+
+@typechecked
+class Crossref:
+    """Wrap around the Crossref API."""
+
+    def __init__(self, email:str|None=None, app: str|None=None) -> None:
+        """
+        Initialize the Crossref object.
+
+        Parameters
+        ----------
+        email: str
+            email of the user of the tool. This parameter
+            is not required but kindly requested by Crossref.
+        app: str
+            name of the application that is executing the query.
+            This parameter is not required but kindly requested by Crossref.
+
+        Returns
+        -------
+        None
+        """
+        self.email = email
+        self.app = app

@@ -84,52 +84,51 @@ class PubMedArticle(Article):
     def _initializeFromXML(self, xml_element: _Element) -> None:
         """Parse an XML element into an article object."""
         # Parse the different fields of the article
-        self.xml = xml_element
         # MedlineCitation data
         base = "MedlineCitation/Article/"
         self.abstract = getAllContent(
-            element=self.xml, path=base + "Abstract/AbstractText"
+            element=xml_element, path=base + "Abstract/AbstractText"
         )
-        self.ISSN = getAllContent(element=self.xml, path=base + "Journal/ISSN")
-        self.journal = getAllContent(element=self.xml, path=base + "Journal/Title")
+        self.issn = getAllContent(element=xml_element, path=base + "Journal/ISSN")
+        self.journal = getAllContent(element=xml_element, path=base + "Journal/Title")
         self.volume = getAllContent(
-            element=self.xml, path=base + "Journal/JournalIssue/Volume"
+            element=xml_element, path=base + "Journal/JournalIssue/Volume"
         )
         self.issue = getAllContent(
-            element=self.xml, path=base + "Journal/JournalIssue/Issue"
+            element=xml_element, path=base + "Journal/JournalIssue/Issue"
         )
         self.start_page = getAllContent(
-            element=self.xml, path=base + "Pagination/StartPage"
+            element=xml_element, path=base + "Pagination/StartPage"
         )
         self.end_page = getAllContent(
-            element=self.xml, path=base + "Pagination/EndPage"
+            element=xml_element, path=base + "Pagination/EndPage"
         )
-        self.title = getAllContent(element=self.xml, path=base + "ArticleTitle")
+        self.title = getAllContent(element=xml_element, path=base + "ArticleTitle")
         self.type = getAllContent(
-            element=self.xml, path=base + "PublicationTypeList/PublicationType"
+            element=xml_element, path=base + "PublicationTypeList/PublicationType"
         )
         if self.type == "Journal Article":
             self.type = "article-journal"
-        self.authors = self._extractAuthors(base)
-        self.publication_date = self._extractPublicationDate(base)
+        self.authors = self._extractAuthors(element=xml_element, base_path=base)
+        self.publication_date = self._extractPublicationDate(element=xml_element, base=base)
 
         # Pubmed data
         base = "PubmedData/"
         self.doi = getAllContent(
-            element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="doi"]'
+            element=xml_element, path=base + 'ArticleIdList/ArticleId[@IdType="doi"]'
         )
         self.pmcid = getAllContent(
-            element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="pmc"]'
+            element=xml_element, path=base + 'ArticleIdList/ArticleId[@IdType="pmc"]'
         )
         self.pmid = getAllContent(
-            element=self.xml, path=base + 'ArticleIdList/ArticleId[@IdType="pubmed"]'
+            element=xml_element, path=base + 'ArticleIdList/ArticleId[@IdType="pubmed"]'
         )
 
         # Other data
-        self.keywords = self._extractKeywords()
-        self.references = self._extractReferences()
+        self.keywords = self._extractKeywords(xml_element)
+        self.references = self._extractReferences(xml_element)
 
-    def _extractAuthors(self, base_path: str) -> List[dict[str, Optional[str]]]:
+    def _extractAuthors(self, element:_Element, base_path: str) -> List[dict[str, Optional[str]]]:
         base_path += "AuthorList/"
         return [
             {
@@ -138,20 +137,20 @@ class PubMedArticle(Article):
                 + getContent(author, "./Initials", ""),
                 "affiliation": getContent(author, "./AffiliationInfo/Affiliation"),
             }
-            for author in self.xml.findall(base_path + "Author")
+            for author in element.findall(base_path + "Author")
         ]
 
-    def _extractKeywords(self) -> List[str] | None:
+    def _extractKeywords(self, element: _Element) -> List[str] | None:
         base = "MedlineCitation/KeywordList/"
         result = [
             keyword.text
-            for keyword in self.xml.findall(base)
+            for keyword in element.findall(base)
             if (keyword is not None and keyword.text is not None)
         ]
         return result if result else None
 
-    def _extractPublicationDate(self, base: str) -> Optional[datetime.date]:
-        publication_date = self.xml.find(base + "ArticleDate")
+    def _extractPublicationDate(self, element: _Element, base: str) -> Optional[datetime.date]:
+        publication_date = element.find(base + "ArticleDate")
         # First try to get the publication date from the ArticleDate tag
         if publication_date is not None:
             year = getContent(publication_date, "./Year")
@@ -162,7 +161,7 @@ class PubMedArticle(Article):
                 return datetime.date(int(year), int(month), int(day))
         # If the ArticleDate tag is not present, try to get the publication date from the PubDate tag
         elif (
-            publication_Date := self.xml.find(base + "Journal/JournalIssue/PubDate")
+            publication_Date := element.find(base + "Journal/JournalIssue/PubDate")
         ) is not None:
             # Try to get the publication date from the PubDate tag
 
@@ -200,10 +199,10 @@ class PubMedArticle(Article):
             month = month_abbr_to_num[month_abbr]
             return datetime.date(int(year), month, int(day))
 
-    def _extractReferences(self) -> List[str] | None:
+    def _extractReferences(self, element: _Element) -> List[str] | None:
 
         references = []
-        for reference in self.xml.findall("PubmedData/ReferenceList/Reference"):
+        for reference in element.findall("PubmedData/ReferenceList/Reference"):
             references.append(getContent(reference, './/ArticleId[@IdType="doi"]', ""))
         return references if references else None
 
