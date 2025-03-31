@@ -1,5 +1,3 @@
-from pymedx_custom import CrossrefArticle
-
-art = CrossrefArticle({})
-
-print(art.to_dict())
+set_a = set('abc')
+set_b = set('abcd')
+print(set_b - set_a)

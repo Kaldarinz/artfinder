@@ -270,7 +270,11 @@ class CrossrefArticle(Article):
 
     def _extract_title(self, data: dict[str, Any]) -> str:
         """Extract the title from the data."""
-        return data.get("title", [""])[0]
+        title = data.get("title", [""])[0]
+        # some titles contain garbage like '&lt;title&gt;' and '&lt;/title&gt;'
+        # remove it
+        title = re.sub(r"&lt;/?title&gt;", "", title)
+        return title.strip()
 
     def _extract_authors(self, data: dict[str, Any]) -> List[dict[str, str | None]]:
         """Extract the authors from the data."""
@@ -344,8 +348,11 @@ class CrossrefArticle(Article):
         
         raw_abstract = data.get("abstract")
         if raw_abstract is not None:
+            # Remove <jats:title> tags and other XML tags
             raw_abstract = re.sub(r'<jats:title>.*</jats:title>', '', raw_abstract)
             raw_abstract = re.sub(r'<[^>]+>', '', raw_abstract).strip()
+            # Remove tabs and new lines
+            raw_abstract = raw_abstract.replace('\t', '').replace('\n', '')
             if len(raw_abstract) > 1:
                 return raw_abstract
 

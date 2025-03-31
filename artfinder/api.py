@@ -6,15 +6,16 @@ import datetime
 import random
 import time
 import logging
-
 from typing import Any, Dict, Generator, cast
 
 import requests
-from crossref.restful import Works
+from crossref.restful import Works, Etiquette
 from lxml import etree as xml
 from typeguard import typechecked
+import pandas as pd
+from pandas import DataFrame
 
-from artfinder.article import PubMedArticle
+from artfinder.article import PubMedArticle, CrossrefArticle
 from artfinder.helpers import (
     arrange_query,
     batches,
@@ -521,10 +522,10 @@ class PubMed:
         return citing_articles_ids
 
 @typechecked
-class Crossref:
+class Crossref(Works):
     """Wrap around the Crossref API."""
 
-    def __init__(self, email:str|None=None, app: str|None=None) -> None:
+    def __init__(self, email:str|None=None, app: str|None=None, *args, **kwargs) -> None:
         """
         Initialize the Crossref object.
 
@@ -541,5 +542,23 @@ class Crossref:
         -------
         None
         """
-        self.email = email
-        self.app = app
+        self.email = email or 'anonymous'
+        self.app = app or 'artfinder'
+        self._etiquette = Etiquette(application_name=self.app, contact_email=self.app)
+        kwargs['etiquette'] = self._etiquette
+        super().__init__(*args, **kwargs)
+
+    def get_df(self) -> DataFrame:
+        """
+        Build data frame query results.
+        """
+
+        # Build list of CrossrefArticle objects
+        all_articles = [CrossrefArticle(article) for article in self]
+        # Create a DataFrame from the list of CrossrefArticle objects
+        df = DataFrame([article.to_dict() for article in all_articles], dtype='string')
+        df['publication_date'] = pd.to_datetime(df['publication_date'])
+        # If the DataFrame is empty, create an empty DataFrame with the correct columns
+        if df.size == 0:
+            df = DataFrame(columns=CrossrefArticle.get_all_slots())
+        return df
