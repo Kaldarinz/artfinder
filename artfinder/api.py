@@ -542,10 +542,13 @@ class Crossref(Works):
         -------
         None
         """
-        self.email = email or 'anonymous'
-        self.app = app or 'artfinder'
-        self._etiquette = Etiquette(application_name=self.app, contact_email=self.app)
-        kwargs['etiquette'] = self._etiquette
+        
+        if kwargs.get('etiquette') is None:
+            self.email = email or 'anonymous'
+            self.app = app or 'artfinder'
+            self.etiquette = Etiquette(application_name=self.app, contact_email=self.email)
+            kwargs['etiquette'] = self.etiquette
+        
         super().__init__(*args, **kwargs)
 
     def get_df(self) -> DataFrame:
