@@ -10,7 +10,7 @@ from typing import Any, Dict, Generator, cast
 from ast import literal_eval
 
 import requests
-from crossref.restful import Works, Etiquette
+from crossref.restful import Works, Etiquette, build_url_endpoint, UrlSyntaxError
 from lxml import etree as xml
 from typeguard import typechecked
 import pandas as pd
@@ -565,27 +565,96 @@ class Crossref(Works):
         if df.size == 0:
             df = DataFrame(columns=CrossrefArticle.get_all_slots())
         return df
+    
+    def filter(self, **kwargs):  # noqa: A003
+        """
+        This method retrieve an iterable object that implements the method
+        __iter__. The arguments given will compose the parameters in the
+        request url.
 
+        This method can be used compounded and recursively with query, filter,
+        order, sort and facet methods.
+
+        kwargs: valid FILTER_VALIDATOR arguments. Replace `.` with `__` and
+        `-` with `_` when using parameters.
+
+        return: iterable object of Works metadata
+
+        Example:
+            >>> from crossref.restful import Works
+            >>> works = Works()
+            >>> query = works.filter(has_funder='true', has_license='true')
+            >>> for item in query:
+            ...     print(item['title'])
+            ...
+            ['Design of smiling-face-shaped band-notched UWB antenna']
+            ['Phase I clinical and pharmacokinetic ... tients with advanced solid tumors']
+            ...
+        """
+        context = str(self.context)
+        request_url = build_url_endpoint(self.ENDPOINT, context)
+        request_params = dict(self.request_params)
+
+        for fltr, value in kwargs.items():
+            decoded_fltr = fltr.replace("__", ".").replace("_", "-")
+            if decoded_fltr not in self.FILTER_VALIDATOR.keys():
+                msg = (
+                    f"Filter {decoded_fltr!s} specified but there is no such filter for"
+                    f" this route. Valid filters for this route"
+                    f" are: {', '.join(self.FILTER_VALIDATOR.keys())}"
+                )
+                raise UrlSyntaxError(
+                    msg,
+                )
+
+            if self.FILTER_VALIDATOR[decoded_fltr] is not None:
+                if isinstance(value, list):
+                    for v in value:
+                        self.FILTER_VALIDATOR[decoded_fltr](str(v))
+                else:
+                    self.FILTER_VALIDATOR[decoded_fltr](str(value))
+                    value = [value]
+
+            for i, v in enumerate(value):
+                if i == 0 and 'filter' not in request_params:
+                    request_params["filter"] = decoded_fltr + ":" + str(v)
+                else:
+                    request_params["filter"] += "," + decoded_fltr + ":" + str(v)
+
+        return self.__class__(
+            request_url=request_url,
+            request_params=request_params,
+            context=context,
+            etiquette=self.etiquette,
+            timeout=self.timeout,
+        )
 
 def load_csv(path: str) -> DataFrame:
     """
     Load a CSV file into a DataFrame.
     """
     
-    cols = list(set(CrossrefArticle.get_all_slots() + PubMedArticle.get_all_slots()))
     df = pd.read_csv(path)
-        # Convert to lower case
+    df = _format_df(df)
+    return df
+
+def _format_df(df: DataFrame) -> DataFrame:
+    """
+    Format the DataFrame to have the correct columns and types."
+    """
+
+    cols = list(set(CrossrefArticle.get_all_slots() + PubMedArticle.get_all_slots()))
+    # Ensure all columns from cols are present in the DataFrame
+    for col in cols:
+        if col not in df.columns:
+            df[col] = pd.NA
+    # Convert to lower case
     for col in ['title', 'abstract', 'authors', 'journal', 'publisher']:
         df[col] = df[col].str.lower()
     # convert to python objects to python types
     for col in ['license', 'link', 'authors', 'references']:
         df[col] = df[col].fillna('None').str.replace('none', 'None').transform(literal_eval)
-    # Ensure all columns from cols are present in the DataFrame
-    for col in cols:
-        if col not in df.columns:
-            df[col] = pd.NA
     # apply column types
     df = df.astype(CrossrefArticle.col_types())
     df['publication_date'] = pd.to_datetime(df['publication_date'], errors='coerce')
-
     return df
