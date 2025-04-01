@@ -564,3 +564,17 @@ class Crossref(Works):
         if df.size == 0:
             df = DataFrame(columns=CrossrefArticle.get_all_slots())
         return df
+
+def load_csv(path: str) -> DataFrame:
+    """
+    Load a CSV file into a DataFrame.
+    """
+    
+    cols = list(set(CrossrefArticle.get_all_slots() + PubMedArticle.get_all_slots()))
+    # Read the CSV file without filtering columns first
+    df = pd.read_csv(path)
+    # Ensure all columns from cols are present in the DataFrame
+    for col in cols:
+        if col not in df.columns:
+            df[col] = pd.NA
+    return df
