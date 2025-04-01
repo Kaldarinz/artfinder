@@ -574,10 +574,10 @@ def load_csv(path: str) -> DataFrame:
     
     cols = list(set(CrossrefArticle.get_all_slots() + PubMedArticle.get_all_slots()))
     df = pd.read_csv(path)
-        # convert to lower case
+        # Convert to lower case
     for col in ['title', 'abstract', 'authors', 'journal', 'publisher']:
         df[col] = df[col].str.lower()
-    # convert to python objects to puthon types
+    # convert to python objects to python types
     for col in ['license', 'link', 'authors', 'references']:
         df[col] = df[col].fillna('None').str.replace('none', 'None').transform(literal_eval)
     # Ensure all columns from cols are present in the DataFrame
