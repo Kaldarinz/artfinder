@@ -60,7 +60,8 @@ class Article:
                 slots.extend(base.__slots__)
         return slots
     
-    def col_types(self) -> dict[str, str]:
+    @staticmethod
+    def col_types() -> dict[str, str]:
         """Return dictionary with column names and their types."""
         return {
             "abstract": "string",
@@ -371,6 +372,12 @@ class CrossrefArticle(Article):
             raw_abstract = raw_abstract.replace('\t', '').replace('\n', '')
             if len(raw_abstract) > 1:
                 return raw_abstract
+
+    @classmethod
+    def col_types(cls) -> Dict[str, str]:
+        col_types = super().col_types()
+        col_types.update({"publisher": "string"})
+        return col_types
 
     def to_df(self) -> pd.DataFrame:
         """Convert the parsed information to a pandas DataFrame."""
