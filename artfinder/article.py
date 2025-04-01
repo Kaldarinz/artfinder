@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, cast
 
 from lxml.etree import _Element
 from typeguard import typechecked
+import pandas as pd
 
 from .helpers import getAllContent, getContent, getContentUnique
 
@@ -58,7 +59,22 @@ class Article:
             if hasattr(base, "__slots__"):
                 slots.extend(base.__slots__)
         return slots
-
+    
+    def col_types(self) -> dict[str, str]:
+        """Return dictionary with column names and their types."""
+        return {
+            "abstract": "string",
+            "title": "string",
+            "doi": "string",
+            "type": "string",
+            "journal": "string",
+            "issn": "string",
+            "volume": "string",
+            "issue": "string",
+            "start_page": "string",
+            "end_page": "string"
+        }
+    
 @typechecked
 class PubMedArticle(Article):
     """Data class that contains a PubMed article."""
@@ -356,4 +372,13 @@ class CrossrefArticle(Article):
             if len(raw_abstract) > 1:
                 return raw_abstract
 
-            
+    def to_df(self) -> pd.DataFrame:
+        """Convert the parsed information to a pandas DataFrame."""
+        col_types = self.col_types()
+        col_types.update(
+            {
+                "publisher": "string",
+            })
+        df = pd.DataFrame([self.to_dict()]).astype(col_types)
+        df['publication_date'] = pd.to_datetime(df['publication_date'])
+        return df

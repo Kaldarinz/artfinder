@@ -559,8 +559,7 @@ class Crossref(Works):
         # Build list of CrossrefArticle objects
         all_articles = [CrossrefArticle(article) for article in self]
         # Create a DataFrame from the list of CrossrefArticle objects
-        df = DataFrame([article.to_dict() for article in all_articles], dtype='string')
-        df['publication_date'] = pd.to_datetime(df['publication_date'])
+        df = pd.concat([article.to_df() for article in all_articles], ignore_index=True)
         # If the DataFrame is empty, create an empty DataFrame with the correct columns
         if df.size == 0:
             df = DataFrame(columns=CrossrefArticle.get_all_slots())
