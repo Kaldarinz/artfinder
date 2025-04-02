@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import warnings
 import datetime
 import random
 import time
+import threading
+import sys
 import logging
 from typing import Any, Dict, Generator, cast
 from ast import literal_eval
+import asyncio
 
+import aiohttp
 import requests
 from crossref.restful import Works, Etiquette, build_url_endpoint, UrlSyntaxError
 from lxml import etree as xml
@@ -27,6 +32,7 @@ from artfinder.helpers import (
     pretty_print_xml
 )
 
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 logger = logging.getLogger(__name__)
 
 # Base url for all queries
@@ -628,6 +634,113 @@ class Crossref(Works):
             etiquette=self.etiquette,
             timeout=self.timeout,
         )
+
+    async def _get_with_limit(self, dois:list[str], rate_limit:int=10) -> tuple[DataFrame, list[str]]:
+        """
+        Get a list of urls with a rate limit.
+
+        Parameters
+        ----------
+        dois: list[str]
+            List of articles doi to fetch.
+        rate_limit: int
+            Maximum number of requests per second.
+
+        Returns
+        -------
+        DataFrame
+            DataFrame with the results.
+        list[str]
+            List of doi that failed to fetch.
+        """
+
+        urls = [build_url_endpoint(endpoint=doi, context='works') for doi in dois]
+        tot_urls = len(urls)
+        failed_doi = []
+        async def fetch(session:aiohttp.ClientSession, url:str) -> dict:
+            """
+            Fetch a single article.
+            """
+            try:
+                async with session.get(url, headers={'User-Agent': str(self.etiquette)}) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    # TODO: handle 429 error properly
+                    else:
+                        logger.error(f"Error fetching {url}: {response.status}")
+                        return {}
+            except Exception as e:
+                logger.error(f"Error fetching {url}: {e}")
+                return {}
+        # TODO: add check for rate limit from headers
+        async def fetch_with_limit(session:aiohttp.ClientSession, url:str, delay_index:int) -> CrossrefArticle|None:
+            """
+            Scheduled launch of article fetch with rate limit.
+            """
+            await asyncio.sleep(delay_index / rate_limit)
+            # print progress in single line
+            sys.stdout.write(f"{(delay_index + 1)}/{tot_urls}: {url}\r")
+            sys.stdout.flush()
+            result = await fetch(session, url)
+            if len(result):
+                try:
+                    return CrossrefArticle(result['message'])
+                except Exception as e:
+                    logger.error(f"Error parsing {url}: {e}")
+                    failed_doi.append(dois[urls.index(url)])
+                    return None
+            
+        async with aiohttp.ClientSession() as session:
+            tasks = [fetch_with_limit(session, url, i) for i, url in enumerate(urls)]
+            results = await asyncio.gather(*tasks)
+            try:
+                return pd.concat((result.to_df() for result in results if result is not None)), failed_doi
+            except:
+                logger.error("Error concatenating results")
+                return pd.DataFrame(), failed_doi
+                    
+
+    def get_dois(self, dois:list[str], concurrent_lim:int=10):
+        """
+        Get all articles from a list of DOIs as dataframe.
+        """
+        
+        # there is a major issue with ipython and jupyter, which run their own
+        # event loop. This causes a RuntimeError when trying to run
+        # to solve this, we need to check if there is a running loop and
+        # if so launch our code in a separate thread
+        try:
+            asyncio.get_running_loop()
+            from queue import Queue
+
+            result_queue = Queue()
+
+            def thread_target():
+                result = asyncio.run(self._get_with_limit(dois, rate_limit=concurrent_lim))
+                result_queue.put(result)
+
+            thread = threading.Thread(target=thread_target)
+            thread.start()
+            thread.join()
+            return result_queue.get()
+        except RuntimeError:
+            return asyncio.run(self._get_with_limit(dois, rate_limit=concurrent_lim))
+
+
+    def get_refs(self, df:DataFrame, concurrent_lim:int=10) -> DataFrame:
+        """
+        Get all references from articles in the DataFrame.
+        """
+
+        # Get all references from articles in the DataFrame
+        all_refs = []
+        for article in df['references']:
+            if article is not None:
+                all_refs.extend(article)
+        all_refs = list(set(all_refs))
+        logger.info(f"Found {len(all_refs)} unique references.")
+        
+
 
 def load_csv(path: str) -> DataFrame:
     """

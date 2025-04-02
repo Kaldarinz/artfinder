@@ -242,7 +242,6 @@ class PubMedArticle(Article):
             indent=4,
         )
 
-
 @typechecked
 class CrossrefArticle(Article):
     """Data class that contains a Crossref article."""
@@ -289,12 +288,14 @@ class CrossrefArticle(Article):
         self.abstract = self._extract_abstract(data)
         self.doi = data.get("DOI", None)
 
-    def _extract_title(self, data: dict[str, Any]) -> str:
+    def _extract_title(self, data: dict[str, Any]) -> str|None:
         """Extract the title from the data."""
-        title = data.get("title", [""])[0]
+        title = data.get("title", [''])
+        if len(title) == 0 or title[0] == "":
+            return None
         # some titles contain garbage like '&lt;title&gt;' and '&lt;/title&gt;'
         # remove it
-        title = re.sub(r"&lt;/?title&gt;", "", title)
+        title = re.sub(r"&lt;/?title&gt;", "", title[0])
         return title.strip()
 
     def _extract_authors(self, data: dict[str, Any]) -> List[dict[str, str | None]]:
