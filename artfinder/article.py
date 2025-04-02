@@ -280,13 +280,20 @@ class CrossrefArticle(Article):
         self.title = self._extract_title(data)
         self.authors = self._extract_authors(data)
         self.is_referenced_by_count = data.get("is-referenced-by-count", None)
-        self.journal = data.get("container-title", [None])[0]
+        self.journal = self._extract_journal(data)
         self.issn = self._extract_issn(data)
         self.start_page, self.end_page = self._extract_pages(data)
         self.references = self._extract_references(data)
         self.publication_date = self._extrac_date(data)
         self.abstract = self._extract_abstract(data)
         self.doi = data.get("DOI", None)
+
+    def _extract_journal(self, data: dict[str, Any]) -> str | None:
+        """Extract the journal from the data."""
+        journal = data.get("container-title", [''])
+        if len(journal) == 0 or journal[0] == "":
+            return None
+        return journal[0].strip()
 
     def _extract_title(self, data: dict[str, Any]) -> str|None:
         """Extract the title from the data."""

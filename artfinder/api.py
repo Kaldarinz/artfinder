@@ -7,6 +7,7 @@ import datetime
 import random
 import time
 import threading
+from queue import Queue
 import sys
 import logging
 from typing import Any, Dict, Generator, cast
@@ -700,7 +701,7 @@ class Crossref(Works):
                 return pd.DataFrame(), failed_doi
                     
 
-    def get_dois(self, dois:list[str], concurrent_lim:int=10):
+    def get_dois(self, dois:list[str], concurrent_lim:int=10) -> tuple[DataFrame, list[str]]:
         """
         Get all articles from a list of DOIs as dataframe.
         """
@@ -711,15 +712,13 @@ class Crossref(Works):
         # if so launch our code in a separate thread
         try:
             asyncio.get_running_loop()
-            from queue import Queue
-
             result_queue = Queue()
 
-            def thread_target():
+            def get_articles():
                 result = asyncio.run(self._get_with_limit(dois, rate_limit=concurrent_lim))
                 result_queue.put(result)
 
-            thread = threading.Thread(target=thread_target)
+            thread = threading.Thread(target=get_articles)
             thread.start()
             thread.join()
             return result_queue.get()
@@ -727,7 +726,7 @@ class Crossref(Works):
             return asyncio.run(self._get_with_limit(dois, rate_limit=concurrent_lim))
 
 
-    def get_refs(self, df:DataFrame, concurrent_lim:int=10) -> DataFrame:
+    def get_refs(self, df:DataFrame, concurrent_lim:int=10) -> tuple[DataFrame, list[str]]:
         """
         Get all references from articles in the DataFrame.
         """
@@ -739,6 +738,7 @@ class Crossref(Works):
                 all_refs.extend(article)
         all_refs = list(set(all_refs))
         logger.info(f"Found {len(all_refs)} unique references.")
+        return self.get_dois(all_refs, concurrent_lim=concurrent_lim)
         
 
 
