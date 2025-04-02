@@ -658,15 +658,29 @@ class Crossref(Works):
         urls = [build_url_endpoint(endpoint=doi, context='works') for doi in dois]
         tot_urls = len(urls)
         failed_doi = []
+        start_time = time.time()
+        lock = asyncio.Lock()
+        num_delays = 0
+        delay = 15
+        concur_limit = 5
+        semaphore = asyncio.Semaphore(concur_limit)
         async def fetch(session:aiohttp.ClientSession, url:str) -> dict:
             """
             Fetch a single article.
             """
+            nonlocal num_delays
             try:
                 async with session.get(url, headers={'User-Agent': str(self.etiquette)}) as response:
                     if response.status == 200:
                         return await response.json()
                     # TODO: handle 429 error properly
+                    if response.status == 429:
+                        logger.error(f"Rate limit exceeded for {url}")
+                        if not lock.locked():
+                            async with lock:
+                                await asyncio.sleep(delay=delay)
+                                num_delays += 1
+                        return {}
                     else:
                         logger.error(f"Error fetching {url}: {response.status}")
                         return {}
@@ -678,18 +692,25 @@ class Crossref(Works):
             """
             Scheduled launch of article fetch with rate limit.
             """
-            await asyncio.sleep(delay_index / rate_limit)
-            # print progress in single line
-            sys.stdout.write(f"{(delay_index + 1)}/{tot_urls}: {url}\r")
-            sys.stdout.flush()
-            result = await fetch(session, url)
-            if len(result):
-                try:
-                    return CrossrefArticle(result['message'])
-                except Exception as e:
-                    logger.error(f"Error parsing {url}: {e}")
-                    failed_doi.append(dois[urls.index(url)])
-                    return None
+            async with semaphore:
+                while lock.locked():
+                    # wait for the lock to be released
+                    await asyncio.sleep(0.1)
+                cur_time = time.time() - delay*num_delays
+                if (cur_time - start_time) < (delay_index / rate_limit):
+                    # wait until the next request can be made
+                    await asyncio.sleep((delay_index / rate_limit) - (cur_time - start_time))
+                # print progress in single line
+                sys.stdout.write(f"{(delay_index + 1)}/{tot_urls}: {url}\r")
+                sys.stdout.flush()
+                result = await fetch(session, url)
+                if len(result):
+                    try:
+                        return CrossrefArticle(result['message'])
+                    except Exception as e:
+                        logger.error(f"Error parsing {url}: {e}")
+                        failed_doi.append(dois[urls.index(url)])
+                        return None
             
         async with aiohttp.ClientSession() as session:
             tasks = [fetch_with_limit(session, url, i) for i, url in enumerate(urls)]
