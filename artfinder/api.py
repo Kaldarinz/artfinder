@@ -13,6 +13,7 @@ import logging
 from typing import Any, Dict, Generator, cast
 from ast import literal_eval
 import asyncio
+import re
 
 import aiohttp
 import requests
@@ -761,7 +762,20 @@ class Crossref(Works):
         logger.info(f"Found {len(all_refs)} unique references.")
         return self.get_dois(all_refs, concurrent_lim=concurrent_lim)
         
+def strict_filter(title: str) -> bool:
 
+    #patterns
+    parts = [
+        r'(?=.*laser\w*)(?=.*\w*(gener|synth|prod|manufact|fabric)\w*)(?=.*(nano|colloid|quantum\sdot)\w*|.*\bnps\b)',
+        r'(?=.*(nano|particle|cluster)\w*)(?=.*\b\w*(ablat|fragment)\w*)'
+    ]
+    pattern = r'(' + r'|'.join(parts) + r')'
+    # exclude patterns
+    exlude_parts = [
+        r'(?!.*nanostructur(ing|ed)\w*)',
+    ]
+    pattern += r''.join(exlude_parts)
+    return re.search(pattern, title, re.IGNORECASE) is not None
 
 def load_csv(path: str) -> DataFrame:
     """

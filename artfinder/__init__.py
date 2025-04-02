@@ -1,4 +1,4 @@
-from .api import PubMed, Crossref, load_csv
+from .api import PubMed, Crossref, load_csv, strict_filter
 from .article import PubMedArticle, CrossrefArticle
 
-__all__ = ["PubMed", "PubMedArticle", "CrossrefArticle", "Crossref", "load_csv"]
+__all__ = ["PubMed", "PubMedArticle", "CrossrefArticle", "Crossref", "load_csv", "strict_filter"]
