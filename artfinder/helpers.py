@@ -5,23 +5,42 @@ from __future__ import annotations
 import datetime
 import re
 import sys
+import os
+import threading
+from queue import Queue
+import asyncio
+
 try:
     from IPython.display import DisplayHandle, display
 except ImportError:
     ...
-
-from typing import Generator, Optional, Union, cast, TypeVar
+from typing import (
+    Generator,
+    Optional,
+    Union,
+    cast,
+    TypeVar,
+    Callable,
+    Coroutine,
+    ParamSpec,
+    Any,
+)
 from xml.etree.ElementTree import Element as EtreeElement
 
 import lxml.etree
-
 from lxml.etree import _Element as LxmlElement
 from typeguard import typechecked
 from typing_extensions import TypeAlias
+from aiohttp import ClientSession, ClientError
+from pandas import DataFrame
+import pandas as pd
 
 Element: TypeAlias = Union[LxmlElement, EtreeElement]
 
 T = TypeVar("T", bound=Optional[str])
+P = ParamSpec("P")
+TA = TypeVar("TA")
+
 
 @typechecked
 def arrange_query(
@@ -138,9 +157,7 @@ def get_range_months(
         # Showing a simulation of how are changing the variables
         # next_month = 2020-03-29 + 000-00-04 = 2020-04-02
         # current_end_date = 2020-04-02 - 000-00-02 = 2020-03-31
-        next_month = current_start_date.replace(day=28) + datetime.timedelta(
-            days=4
-        )
+        next_month = current_start_date.replace(day=28) + datetime.timedelta(days=4)
         current_end_date = next_month - datetime.timedelta(days=next_month.day)
 
         # Adjust the end date if it goes beyond the specified end_date
@@ -197,9 +214,7 @@ def get_range_date_from_query(
     matches = re.findall(date_pattern, input_string)
 
     # Convert the extracted date strings into datetime objects
-    dates = [
-        datetime.datetime.strptime(date, "%Y/%m/%d").date() for date in matches
-    ]
+    dates = [datetime.datetime.strptime(date, "%Y/%m/%d").date() for date in matches]
 
     # Check if exists dates otherwise return None
     if len(dates) == EXPECTED_DATES:
@@ -264,9 +279,7 @@ def get_range_years(
 
 
 @typechecked
-def batches(
-    iterable: list[str], n: int = 1
-) -> Generator[list[str], None, None]:
+def batches(iterable: list[str], n: int = 1) -> Generator[list[str], None, None]:
     """
     Create batches from an iterable.
 
@@ -463,8 +476,9 @@ def getAbstract(
     # Extract the text and return it
     return " ".join(result.split())
 
+
 @typechecked
-def _print_tags_recursively(element:LxmlElement, indent=0):
+def _print_tags_recursively(element: LxmlElement, indent=0):
     """
     Print a human-readable representation of the tags in the XML element recursively.
 
@@ -478,6 +492,7 @@ def _print_tags_recursively(element:LxmlElement, indent=0):
     print("|-" * indent + f"Tag: {element.tag}: {element.text}")
     for child in element:
         _print_tags_recursively(child, indent + 1)
+
 
 @typechecked
 def pretty_print_xml(xml: LxmlElement) -> None:
@@ -493,6 +508,134 @@ def pretty_print_xml(xml: LxmlElement) -> None:
     print("Root tags:")
     _print_tags_recursively(xml)
 
+
+def _execute_coro(func: Callable[P, Coroutine[Any, Any, TA]], *args, **kwargs) -> TA:
+    """
+    Launch function asyncronously in separate thread.
+    """
+
+    result_queue = Queue()
+
+    def get_func():
+        result = asyncio.run(func(*args, **kwargs))
+        result_queue.put(result)
+
+    thread = threading.Thread(target=get_func)
+    thread.start()
+    thread.join()
+    return result_queue.get()
+
+
+def full_texts(df: DataFrame, dois: list[str], save_paths: list[str] | None = None) -> None:
+    """
+    Download full texts from DOIs.
+
+    Parameters
+    ----------
+    dois: List[str]
+        List of DOIs to download.
+    save_paths: List[str]
+        List of paths to save the downloaded files.
+    """
+
+    pass
+
+
+def full_texts_from_urls(
+    urls: list[str], save_paths: list[str]|None=None, concurrent: int = 5
+) -> None:
+    """
+    Download full texts from URLs.
+
+    Parameters
+    ----------
+    urls: List[str]
+        List of URLs to download.
+    save_paths: List[str]
+        List of paths to save the downloaded files.
+    concurrent: int
+        Number of concurrent downloads.
+    """
+    if save_paths is None:
+        save_paths = [os.path.join('download', 'file_' + str(i) + '.pdf') for i in range(len(urls))]
+    if len(urls) != len(save_paths):
+        raise ValueError("Length of urls and save_paths must be the same.")
+    return _execute_coro(_download_files, urls, save_paths, concurrent)
+
+
+async def _download_files(
+    urls: list[str], save_paths: list[str], concurrent: int
+) -> None:
+    """
+    Actual download function.
+    """
+
+    concurrency_limit = asyncio.Semaphore(concurrent)
+    chunk_size = 1024
+    printer = MultiLinePrinter(concurrent + 1)
+    total_line = printer.get_line()
+    total_line(f"Downloading {len(urls)} files...")
+    async def download_file(
+        session: ClientSession, url: str, save_path: str, task_id: int
+    ) -> None:
+
+        async with concurrency_limit:
+            line = printer.get_line()
+            async with session.get(url) as response:
+                if response.status == 200:
+                    total_size = int(
+                        response.headers.get("Content-Length", 0)
+                    )  # Get total file size
+                    downloaded_size = 0
+
+                    with open(save_path, "wb") as f:
+                        try:
+                            while chunk := await response.content.read(chunk_size):
+                                f.write(chunk)
+                                downloaded_size += len(chunk)
+                                # Update progress for this task
+                                progress = (
+                                    (downloaded_size / total_size) * 100 if total_size else 0
+                                )
+                                line(
+                                    f"Task {task_id}: Downloading: {progress:.2f}% ({downloaded_size/1024:.1f}/{total_size/1024:.1f} kb)"
+                                )
+                        except ClientError as e:
+                            line(f"Task {task_id}: Network error occurred: {e}")
+                        except asyncio.IncompleteReadError as e:
+                            line(f"Task {task_id}: Incomplete read error: {e}")
+
+                    line(f"Task {task_id}: File downloaded: {save_path}")
+                    total_line(f"Downloaded {task_id + 1}/{len(urls)} files")
+                else:
+                    line(
+                        f"Task {task_id}: Failed to download file. HTTP status: {response.status}"
+                    )
+            printer.free_line(line)
+
+    async def periodic_print() -> None:
+        try:
+            while True:
+                printer.print()
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            printer.close()
+
+    printer_task = asyncio.create_task(periodic_print())
+    async with ClientSession() as session:
+        tasks = [
+            download_file(session, url, save_path, i) for i, (url, save_path) in enumerate(zip(urls, save_paths))
+        ]
+        await asyncio.gather(*tasks)
+    printer_task.cancel()
+    try:
+        await printer_task
+    except asyncio.CancelledError:
+        pass
+        
+    printer_task.cancel()
+
+
 class LinePrinter:
     """
     Class to handle printing on the same line.
@@ -501,7 +644,6 @@ class LinePrinter:
     def __init__(self) -> None:
         if "ipykernel" in sys.modules:
             self.display_id = cast(DisplayHandle, display(display_id=True))
-
 
     def __call__(self, text) -> None:
         if "ipykernel" in sys.modules:
@@ -514,3 +656,44 @@ class LinePrinter:
         if "ipykernel" not in sys.modules:
             print()
 
+class MultiLinePrinter:
+    """
+    Class to handle printing on the same line.
+    """
+
+    def __init__(self, lines:int) -> None:
+        if "ipykernel" in sys.modules:
+            self.display_id = cast(DisplayHandle, display(display_id=True))
+        self.lines_no = lines
+        self.lines = [PrinterLine(i, False) for i in range(lines)]
+
+    def print(self) -> None:
+        if "ipykernel" in sys.modules:
+            self.display_id.update([print(line.text) for line in self.lines], clear=True)
+        else:
+            print("\033[2K\033[1G", end="")
+            print("Not implemented", end="")
+
+    def get_line(self) -> PrinterLine:
+        for line in self.lines:
+            if not line.busy:
+                line.busy = True
+                return line
+        raise RuntimeError("No available lines")
+    
+    def free_line(self, line:PrinterLine) -> None:
+        line.busy = False
+
+    def close(self) -> None:
+        if "ipykernel" not in sys.modules:
+            print()
+
+class PrinterLine:
+
+    def __init__(self, id: int, busy: bool) -> None:
+        self.id = id
+        self.busy = busy
+        self.text = ""
+
+    def __call__(self, text: str) -> None:
+        self.text = text

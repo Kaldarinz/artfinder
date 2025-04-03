@@ -32,7 +32,8 @@ from artfinder.helpers import (
     get_range_months,
     get_range_years,
     get_search_term,
-    LinePrinter
+    LinePrinter,
+    _execute_coro
 )
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -748,16 +749,13 @@ class Crossref(Works):
                 df = pd.concat(
                         (result.to_df() for result in results if result is not None)
                     )
-                if not df.empty:
-                    
-                    printer(f"Obtained {len(df)} articles.")
-                else:
-                    printer("No articles obtained.")
-                printer.close()
+                printer(f"Obtained {len(df)} article{'s' if len(df) > 1 else ''}.")
                 return df, failed_doi
-            except:
-                logger.error("Error concatenating results")
+            except ValueError:
+                printer("No articles obtained.")
                 return pd.DataFrame(), failed_doi
+            finally:
+                printer.close()
 
     def get_dois(
         self, dois: list[str], concurrent_lim: int = 50
@@ -766,26 +764,7 @@ class Crossref(Works):
         Get all articles from a list of DOIs as dataframe.
         """
 
-        return self._execute_coro(self._get_with_limit, dois, rate_limit=concurrent_lim)
-
-    def _execute_coro(self, func: Callable[P, Coroutine[Any, Any, T]], *args, **kwargs) -> T:
-        """
-        Launch function asyncronously in separate thread.
-        """
-
-        result_queue = Queue()
-
-        def get_func():
-            result = asyncio.run(
-                func(*args, **kwargs)
-            )
-            result_queue.put(result)
-
-        thread = threading.Thread(target=get_func)
-        thread.start()
-        thread.join()
-        return result_queue.get()
-
+        return _execute_coro(self._get_with_limit, dois, rate_limit=concurrent_lim)
 
     def get_refs(
         self, df: DataFrame, concurrent_lim: int = 50
@@ -801,8 +780,7 @@ class Crossref(Works):
                 all_refs.extend(article)
         all_refs = list(set(all_refs))
         print(f"Found {len(all_refs)} unique references.")
-        return self._execute_coro(self._get_with_limit, all_refs, rate_limit=concurrent_lim)
-
+        return _execute_coro(self._get_with_limit, all_refs, rate_limit=concurrent_lim)
 
 def strict_filter(title: str) -> bool:
 
@@ -819,7 +797,6 @@ def strict_filter(title: str) -> bool:
     pattern += r"".join(exlude_parts)
     return re.search(pattern, title, re.IGNORECASE) is not None
 
-
 def load_csv(path: str) -> DataFrame:
     """
     Load a CSV file into a DataFrame.
@@ -828,7 +805,6 @@ def load_csv(path: str) -> DataFrame:
     df = pd.read_csv(path)
     df = _format_df(df)
     return df
-
 
 def _format_df(df: DataFrame) -> DataFrame:
     """
