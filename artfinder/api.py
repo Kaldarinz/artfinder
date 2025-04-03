@@ -10,7 +10,7 @@ import threading
 from queue import Queue
 import sys
 import logging
-from typing import Any, Dict, Generator, cast
+from typing import Any, Dict, Generator, cast, Callable, ParamSpec, TypeVar, Coroutine
 from ast import literal_eval
 import asyncio
 import re
@@ -32,11 +32,14 @@ from artfinder.helpers import (
     get_range_months,
     get_range_years,
     get_search_term,
-    pretty_print_xml,
+    LinePrinter
 )
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+P = ParamSpec("P")
 
 # Base url for all queries
 BASE_URL = "https://eutils.ncbi.nlm.nih.gov"
@@ -682,6 +685,7 @@ class Crossref(Works):
         timeout = asyncio.Event()
         timeout.set()
         last_fetch = time.time()
+        printer = LinePrinter()
 
         async def fetch(session: ClientSession, url: str) -> dict:
             """
@@ -726,8 +730,7 @@ class Crossref(Works):
                     # wait until the next request can be made
                     await asyncio.sleep((1 / rate_limit) - (cur_time - last_fetch))
                 # print progress in single line
-                sys.stdout.write(f"{(article_index + 1)}/{tot_urls}: {url}\r")
-                sys.stdout.flush()
+                printer(f"{(article_index + 1)}/{tot_urls}: {url}")
                 last_fetch = time.time()
                 result = await fetch(session, url)
                 if len(result):
@@ -742,12 +745,16 @@ class Crossref(Works):
             tasks = [fetch_with_limit(session, url, i) for i, url in enumerate(urls)]
             results = await asyncio.gather(*tasks)
             try:
-                return (
-                    pd.concat(
+                df = pd.concat(
                         (result.to_df() for result in results if result is not None)
-                    ),
-                    failed_doi,
-                )
+                    )
+                if not df.empty:
+                    
+                    printer(f"Obtained {len(df)} articles.")
+                else:
+                    printer("No articles obtained.")
+                printer.close()
+                return df, failed_doi
             except:
                 logger.error("Error concatenating results")
                 return pd.DataFrame(), failed_doi
@@ -759,26 +766,26 @@ class Crossref(Works):
         Get all articles from a list of DOIs as dataframe.
         """
 
-        # there is a major issue with ipython and jupyter, which run their own
-        # event loop. This causes a RuntimeError when trying to run
-        # to solve this, we need to check if there is a running loop and
-        # if so launch our code in a separate thread
-        try:
-            asyncio.get_running_loop()
-            result_queue = Queue()
+        return self._execute_coro(self._get_with_limit, dois, rate_limit=concurrent_lim)
 
-            def get_articles():
-                result = asyncio.run(
-                    self._get_with_limit(dois, rate_limit=concurrent_lim)
-                )
-                result_queue.put(result)
+    def _execute_coro(self, func: Callable[P, Coroutine[Any, Any, T]], *args, **kwargs) -> T:
+        """
+        Launch function asyncronously in separate thread.
+        """
 
-            thread = threading.Thread(target=get_articles)
-            thread.start()
-            thread.join()
-            return result_queue.get()
-        except RuntimeError:
-            return asyncio.run(self._get_with_limit(dois, rate_limit=concurrent_lim))
+        result_queue = Queue()
+
+        def get_func():
+            result = asyncio.run(
+                func(*args, **kwargs)
+            )
+            result_queue.put(result)
+
+        thread = threading.Thread(target=get_func)
+        thread.start()
+        thread.join()
+        return result_queue.get()
+
 
     def get_refs(
         self, df: DataFrame, concurrent_lim: int = 50
@@ -793,8 +800,8 @@ class Crossref(Works):
             if article is not None:
                 all_refs.extend(article)
         all_refs = list(set(all_refs))
-        logger.info(f"Found {len(all_refs)} unique references.")
-        return self.get_dois(all_refs, concurrent_lim=concurrent_lim)
+        print(f"Found {len(all_refs)} unique references.")
+        return self._execute_coro(self._get_with_limit, all_refs, rate_limit=concurrent_lim)
 
 
 def strict_filter(title: str) -> bool:

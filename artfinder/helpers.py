@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import datetime
 import re
+import sys
+try:
+    from IPython.display import DisplayHandle, display
+except ImportError:
+    ...
 
 from typing import Generator, Optional, Union, cast, TypeVar
 from xml.etree.ElementTree import Element as EtreeElement
@@ -487,3 +492,25 @@ def pretty_print_xml(xml: LxmlElement) -> None:
 
     print("Root tags:")
     _print_tags_recursively(xml)
+
+class LinePrinter:
+    """
+    Class to handle printing on the same line.
+    """
+
+    def __init__(self) -> None:
+        if "ipykernel" in sys.modules:
+            self.display_id = cast(DisplayHandle, display(display_id=True))
+
+
+    def __call__(self, text) -> None:
+        if "ipykernel" in sys.modules:
+            self.display_id.update(text)
+        else:
+            print("\033[2K\033[1G", end="")
+            print(text, end="")
+
+    def close(self) -> None:
+        if "ipykernel" not in sys.modules:
+            print()
+
