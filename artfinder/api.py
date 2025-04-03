@@ -16,6 +16,7 @@ import asyncio
 import re
 
 import aiohttp
+from aiohttp import ClientResponse, ClientSession
 import requests
 from crossref.restful import Works, Etiquette, build_url_endpoint, UrlSyntaxError
 from lxml import etree as xml
@@ -31,7 +32,7 @@ from artfinder.helpers import (
     get_range_months,
     get_range_years,
     get_search_term,
-    pretty_print_xml
+    pretty_print_xml,
 )
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -44,6 +45,7 @@ BASE_URL = "https://eutils.ncbi.nlm.nih.gov"
 MAX_RECORDS_PM = 9999
 
 TIMEOUT = 10
+
 
 @typechecked
 class PubMed:
@@ -125,14 +127,19 @@ class PubMed:
             yield from self._getArticles(article_ids=batch)
 
     def getCitingArticles(
-        self, pmid: str|int|None=None, doi: str|None=None, max_results: int = MAX_RECORDS_PM
+        self,
+        pmid: str | int | None = None,
+        doi: str | None = None,
+        max_results: int = MAX_RECORDS_PM,
     ) -> Generator[PubMedArticle]:
         """
         Return the articles that cite the given article.
         """
 
         if pmid is None:
-            raise NotImplementedError("Citing articles search is only supported for pmid")
+            raise NotImplementedError(
+                "Citing articles search is only supported for pmid"
+            )
         citing_article_ids = self._getCitingArticlesIDs(str(pmid), doi)
         total_citing_articles = len(citing_article_ids)
         logger.info(f"Found: {total_citing_articles} siting articles. Fetching...")
@@ -142,7 +149,7 @@ class PubMed:
             raise NotImplementedError(
                 "Large citing articles count is not supported yet"
             )
-        
+
         # Get the articles themselves
         for batch in batches(citing_article_ids, 250):
             yield from self._getArticles(article_ids=batch)
@@ -267,16 +274,18 @@ class PubMed:
 
         while attempt < self._maxRetries:
             try:
-                logger.debug(f'Attempt {attempt + 1}/{self._maxRetries}')
+                logger.debug(f"Attempt {attempt + 1}/{self._maxRetries}")
                 # xml or json
                 parameters["retmode"] = output
 
                 # Make the request to PubMed
-                logger.debug(f'Requesting {BASE_URL}{url} with parameters {parameters}')
-                response = requests.get(f"{BASE_URL}{url}", timeout=TIMEOUT, params=parameters)
+                logger.debug(f"Requesting {BASE_URL}{url} with parameters {parameters}")
+                response = requests.get(
+                    f"{BASE_URL}{url}", timeout=TIMEOUT, params=parameters
+                )
                 # Check for any errors
                 response.raise_for_status()
-                logger.debug(f'Response status code: {response.status_code}')
+                logger.debug(f"Response status code: {response.status_code}")
 
                 # Add this request to the list of requests made
                 self._requestsMade.append(datetime.datetime.now())
@@ -366,9 +375,7 @@ class PubMed:
 
         return article_ids
 
-    def _getArticles(
-        self, article_ids: list[str]
-    ) -> Generator[PubMedArticle]:
+    def _getArticles(self, article_ids: list[str]) -> Generator[PubMedArticle]:
         """
         Retrieve articles from PubMed.
         """
@@ -491,7 +498,9 @@ class PubMed:
         # Return the response
         return article_ids
 
-    def _getCitingArticlesIDs(self, pmid: str|None=None, doi: str|None=None) -> list[str]:
+    def _getCitingArticlesIDs(
+        self, pmid: str | None = None, doi: str | None = None
+    ) -> list[str]:
         """
         Return the IDs of the articles that cite the given article.
         """
@@ -530,11 +539,14 @@ class PubMed:
         # Return the number of citing articles
         return citing_articles_ids
 
+
 @typechecked
 class Crossref(Works):
     """Wrap around the Crossref API."""
 
-    def __init__(self, email:str|None=None, app: str|None=None, *args, **kwargs) -> None:
+    def __init__(
+        self, email: str | None = None, app: str | None = None, *args, **kwargs
+    ) -> None:
         """
         Initialize the Crossref object.
 
@@ -551,13 +563,15 @@ class Crossref(Works):
         -------
         None
         """
-        
-        if kwargs.get('etiquette') is None:
-            self.email = email or 'anonymous'
-            self.app = app or 'artfinder'
-            self.etiquette = Etiquette(application_name=self.app, contact_email=self.email)
-            kwargs['etiquette'] = self.etiquette
-        
+
+        if kwargs.get("etiquette") is None:
+            self.email = email or "anonymous"
+            self.app = app or "artfinder"
+            self.etiquette = Etiquette(
+                application_name=self.app, contact_email=self.email
+            )
+            kwargs["etiquette"] = self.etiquette
+
         super().__init__(*args, **kwargs)
 
     def get_df(self) -> DataFrame:
@@ -573,7 +587,7 @@ class Crossref(Works):
         if df.size == 0:
             df = DataFrame(columns=CrossrefArticle.get_all_slots())
         return df
-    
+
     def filter(self, **kwargs):  # noqa: A003
         """
         This method retrieve an iterable object that implements the method
@@ -624,7 +638,7 @@ class Crossref(Works):
                     value = [value]
 
             for i, v in enumerate(value):
-                if i == 0 and 'filter' not in request_params:
+                if i == 0 and "filter" not in request_params:
                     request_params["filter"] = decoded_fltr + ":" + str(v)
                 else:
                     request_params["filter"] += "," + decoded_fltr + ":" + str(v)
@@ -637,7 +651,9 @@ class Crossref(Works):
             timeout=self.timeout,
         )
 
-    async def _get_with_limit(self, dois:list[str], rate_limit:int=10) -> tuple[DataFrame, list[str]]:
+    async def _get_with_limit(
+        self, dois: list[str], rate_limit: int = 10
+    ) -> tuple[DataFrame, list[str]]:
         """
         Get a list of urls with a rate limit.
 
@@ -656,31 +672,35 @@ class Crossref(Works):
             List of doi that failed to fetch.
         """
 
-        urls = [build_url_endpoint(endpoint=doi, context='works') for doi in dois]
+        urls = [build_url_endpoint(endpoint=doi, context="works") for doi in dois]
         tot_urls = len(urls)
         failed_doi = []
-        start_time = time.time()
-        lock = asyncio.Lock()
-        num_delays = 0
-        delay = 15
+
         concur_limit = 5
-        semaphore = asyncio.Semaphore(concur_limit)
-        async def fetch(session:aiohttp.ClientSession, url:str) -> dict:
+        timeout_daley = 15
+        concur_requests_limit = asyncio.Semaphore(concur_limit)
+        timeout = asyncio.Event()
+        timeout.set()
+        last_fetch = time.time()
+
+        async def fetch(session: ClientSession, url: str) -> dict:
             """
             Fetch a single article.
             """
-            nonlocal num_delays
             try:
-                async with session.get(url, headers={'User-Agent': str(self.etiquette)}) as response:
+                async with session.get(
+                    url, headers={"User-Agent": str(self.etiquette)}
+                ) as response:
                     if response.status == 200:
                         return await response.json()
-                    # TODO: handle 429 error properly
+                    # TODO: to handle 429 error properly, we should check current limits from headers
                     if response.status == 429:
                         logger.error(f"Rate limit exceeded for {url}")
-                        if not lock.locked():
-                            async with lock:
-                                await asyncio.sleep(delay=delay)
-                                num_delays += 1
+                        # TODO: delay should be started from the laset recieved 429 error, not the first
+                        if timeout.is_set():
+                            timeout.clear()
+                            await asyncio.sleep(delay=timeout_daley)
+                            timeout.set()
                         return {}
                     else:
                         logger.error(f"Error fetching {url}: {response.status}")
@@ -688,46 +708,57 @@ class Crossref(Works):
             except Exception as e:
                 logger.error(f"Error fetching {url}: {e}")
                 return {}
-        # TODO: add check for rate limit from headers
-        async def fetch_with_limit(session:aiohttp.ClientSession, url:str, delay_index:int) -> CrossrefArticle|None:
+
+        async def fetch_with_limit(
+            session: aiohttp.ClientSession, url: str, article_index: int
+        ) -> CrossrefArticle | None:
             """
             Scheduled launch of article fetch with rate limit.
             """
-            async with semaphore:
-                while lock.locked():
-                    # wait for the lock to be released
-                    await asyncio.sleep(0.1)
-                cur_time = time.time() - delay*num_delays
-                if (cur_time - start_time) < (delay_index / rate_limit):
+
+            nonlocal last_fetch
+            # respect concurrent requests limit
+            async with concur_requests_limit:
+                # wait for timeout if 429 error occured
+                await timeout.wait()
+                cur_time = time.time()
+                if (cur_time - last_fetch) < (1 / rate_limit):
                     # wait until the next request can be made
-                    await asyncio.sleep((delay_index / rate_limit) - (cur_time - start_time))
+                    await asyncio.sleep((1 / rate_limit) - (cur_time - last_fetch))
                 # print progress in single line
-                sys.stdout.write(f"{(delay_index + 1)}/{tot_urls}: {url}\r")
+                sys.stdout.write(f"{(article_index + 1)}/{tot_urls}: {url}\r")
                 sys.stdout.flush()
+                last_fetch = time.time()
                 result = await fetch(session, url)
                 if len(result):
                     try:
-                        return CrossrefArticle(result['message'])
+                        return CrossrefArticle(result["message"])
                     except Exception as e:
                         logger.error(f"Error parsing {url}: {e}")
                         failed_doi.append(dois[urls.index(url)])
                         return None
-            
-        async with aiohttp.ClientSession() as session:
+
+        async with ClientSession() as session:
             tasks = [fetch_with_limit(session, url, i) for i, url in enumerate(urls)]
             results = await asyncio.gather(*tasks)
             try:
-                return pd.concat((result.to_df() for result in results if result is not None)), failed_doi
+                return (
+                    pd.concat(
+                        (result.to_df() for result in results if result is not None)
+                    ),
+                    failed_doi,
+                )
             except:
                 logger.error("Error concatenating results")
                 return pd.DataFrame(), failed_doi
-                    
 
-    def get_dois(self, dois:list[str], concurrent_lim:int=10) -> tuple[DataFrame, list[str]]:
+    def get_dois(
+        self, dois: list[str], concurrent_lim: int = 50
+    ) -> tuple[DataFrame, list[str]]:
         """
         Get all articles from a list of DOIs as dataframe.
         """
-        
+
         # there is a major issue with ipython and jupyter, which run their own
         # event loop. This causes a RuntimeError when trying to run
         # to solve this, we need to check if there is a running loop and
@@ -737,7 +768,9 @@ class Crossref(Works):
             result_queue = Queue()
 
             def get_articles():
-                result = asyncio.run(self._get_with_limit(dois, rate_limit=concurrent_lim))
+                result = asyncio.run(
+                    self._get_with_limit(dois, rate_limit=concurrent_lim)
+                )
                 result_queue.put(result)
 
             thread = threading.Thread(target=get_articles)
@@ -747,44 +780,48 @@ class Crossref(Works):
         except RuntimeError:
             return asyncio.run(self._get_with_limit(dois, rate_limit=concurrent_lim))
 
-
-    def get_refs(self, df:DataFrame, concurrent_lim:int=10) -> tuple[DataFrame, list[str]]:
+    def get_refs(
+        self, df: DataFrame, concurrent_lim: int = 50
+    ) -> tuple[DataFrame, list[str]]:
         """
         Get all references from articles in the DataFrame.
         """
 
         # Get all references from articles in the DataFrame
         all_refs = []
-        for article in df['references']:
+        for article in df["references"]:
             if article is not None:
                 all_refs.extend(article)
         all_refs = list(set(all_refs))
         logger.info(f"Found {len(all_refs)} unique references.")
         return self.get_dois(all_refs, concurrent_lim=concurrent_lim)
-        
+
+
 def strict_filter(title: str) -> bool:
 
-    #patterns
+    # patterns
     parts = [
-        r'(?=.*laser\w*)(?=.*\w*(gener|synth|prod|manufact|fabric)\w*)(?=.*(nano|colloid|quantum\sdot)\w*|.*\bnps\b)',
-        r'(?=.*(nano|particle|cluster)\w*)(?=.*\b\w*(ablat|fragment)\w*)'
+        r"(?=.*laser\w*)(?=.*\w*(gener|synth|prod|manufact|fabric)\w*)(?=.*(nano|colloid|quantum\sdot)\w*|.*\bnps\b)",
+        r"(?=.*(nano|particle|cluster)\w*)(?=.*\b\w*(ablat|fragment)\w*)",
     ]
-    pattern = r'(' + r'|'.join(parts) + r')'
+    pattern = r"(" + r"|".join(parts) + r")"
     # exclude patterns
     exlude_parts = [
-        r'(?!.*nanostructur(ing|ed)\w*)',
+        r"(?!.*nanostructur(ing|ed)\w*)",
     ]
-    pattern += r''.join(exlude_parts)
+    pattern += r"".join(exlude_parts)
     return re.search(pattern, title, re.IGNORECASE) is not None
+
 
 def load_csv(path: str) -> DataFrame:
     """
     Load a CSV file into a DataFrame.
     """
-    
+
     df = pd.read_csv(path)
     df = _format_df(df)
     return df
+
 
 def _format_df(df: DataFrame) -> DataFrame:
     """
@@ -797,12 +834,14 @@ def _format_df(df: DataFrame) -> DataFrame:
         if col not in df.columns:
             df[col] = pd.NA
     # Convert to lower case
-    for col in ['title', 'abstract', 'authors', 'journal', 'publisher']:
+    for col in ["title", "abstract", "authors", "journal", "publisher"]:
         df[col] = df[col].str.lower()
     # convert to python objects to python types
-    for col in ['license', 'link', 'authors', 'references']:
-        df[col] = df[col].fillna('None').str.replace('none', 'None').transform(literal_eval)
+    for col in ["license", "link", "authors", "references"]:
+        df[col] = (
+            df[col].fillna("None").str.replace("none", "None").transform(literal_eval)
+        )
     # apply column types
     df = df.astype(CrossrefArticle.col_types())
-    df['publication_date'] = pd.to_datetime(df['publication_date'], errors='coerce')
+    df["publication_date"] = pd.to_datetime(df["publication_date"], errors="coerce")
     return df
