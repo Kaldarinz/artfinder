@@ -11,7 +11,7 @@ from queue import Queue
 import asyncio
 
 try:
-    from IPython.display import DisplayHandle, display
+    from IPython.display import DisplayHandle, display, clear_output
 except ImportError:
     ...
 from typing import (
@@ -526,7 +526,9 @@ def _execute_coro(func: Callable[P, Coroutine[Any, Any, TA]], *args, **kwargs) -
     return result_queue.get()
 
 
-def full_texts(df: DataFrame, dois: list[str], save_paths: list[str] | None = None) -> None:
+def full_texts(
+    df: DataFrame, dois: list[str], save_paths: list[str] | None = None
+) -> None:
     """
     Download full texts from DOIs.
 
@@ -542,7 +544,7 @@ def full_texts(df: DataFrame, dois: list[str], save_paths: list[str] | None = No
 
 
 def full_texts_from_urls(
-    urls: list[str], save_paths: list[str]|None=None, concurrent: int = 5
+    urls: list[str], save_paths: list[str] | None = None, concurrent: int = 5
 ) -> None:
     """
     Download full texts from URLs.
@@ -557,7 +559,10 @@ def full_texts_from_urls(
         Number of concurrent downloads.
     """
     if save_paths is None:
-        save_paths = [os.path.join('download', 'file_' + str(i) + '.pdf') for i in range(len(urls))]
+        save_paths = [
+            os.path.join("download", "file_" + str(i) + ".pdf")
+            for i in range(len(urls))
+        ]
     if len(urls) != len(save_paths):
         raise ValueError("Length of urls and save_paths must be the same.")
     return _execute_coro(_download_files, urls, save_paths, concurrent)
@@ -572,13 +577,18 @@ async def _download_files(
 
     concurrency_limit = asyncio.Semaphore(concurrent)
     chunk_size = 1024
+    downloaded_files = 0
+    restricted_files = 0
+    faield_files = 0
     printer = MultiLinePrinter(concurrent + 1)
     total_line = printer.get_line()
     total_line(f"Downloading {len(urls)} files...")
+
     async def download_file(
         session: ClientSession, url: str, save_path: str, task_id: int
     ) -> None:
 
+        nonlocal downloaded_files, restricted_files, faield_files
         async with concurrency_limit:
             line = printer.get_line()
             async with session.get(url) as response:
@@ -595,7 +605,9 @@ async def _download_files(
                                 downloaded_size += len(chunk)
                                 # Update progress for this task
                                 progress = (
-                                    (downloaded_size / total_size) * 100 if total_size else 0
+                                    (downloaded_size / total_size) * 100
+                                    if total_size
+                                    else 0
                                 )
                                 line(
                                     f"Task {task_id}: Downloading: {progress:.2f}% ({downloaded_size/1024:.1f}/{total_size/1024:.1f} kb)"
@@ -604,27 +616,37 @@ async def _download_files(
                             line(f"Task {task_id}: Network error occurred: {e}")
                         except asyncio.IncompleteReadError as e:
                             line(f"Task {task_id}: Incomplete read error: {e}")
-
+                    downloaded_files += 1
                     line(f"Task {task_id}: File downloaded: {save_path}")
-                    total_line(f"Downloaded {task_id + 1}/{len(urls)} files")
+                elif response.status == 403:
+                    restricted_files += 1
+                    line(
+                        f"Task {task_id}: Access denied. HTTP status: {response.status}"
+                    )
                 else:
+                    faield_files += 1
                     line(
                         f"Task {task_id}: Failed to download file. HTTP status: {response.status}"
                     )
+            total_line(
+                f"{len(urls)} links. {downloaded_files} downloaded. {restricted_files} restricted. {faield_files} failed."
+            )
+            printer.print()
             printer.free_line(line)
 
     async def periodic_print() -> None:
         try:
             while True:
                 printer.print()
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             printer.close()
 
     printer_task = asyncio.create_task(periodic_print())
     async with ClientSession() as session:
         tasks = [
-            download_file(session, url, save_path, i) for i, (url, save_path) in enumerate(zip(urls, save_paths))
+            download_file(session, url, save_path, i)
+            for i, (url, save_path) in enumerate(zip(urls, save_paths))
         ]
         await asyncio.gather(*tasks)
     printer_task.cancel()
@@ -632,7 +654,7 @@ async def _download_files(
         await printer_task
     except asyncio.CancelledError:
         pass
-        
+
     printer_task.cancel()
 
 
@@ -656,12 +678,13 @@ class LinePrinter:
         if "ipykernel" not in sys.modules:
             print()
 
+
 class MultiLinePrinter:
     """
     Class to handle printing on the same line.
     """
 
-    def __init__(self, lines:int) -> None:
+    def __init__(self, lines: int) -> None:
         if "ipykernel" in sys.modules:
             self.display_id = cast(DisplayHandle, display(display_id=True))
         self.lines_no = lines
@@ -669,7 +692,9 @@ class MultiLinePrinter:
 
     def print(self) -> None:
         if "ipykernel" in sys.modules:
-            self.display_id.update([print(line.text) for line in self.lines], clear=True)
+            self.display_id.update(
+                [print(line.text) for line in self.lines], clear=True
+            )
         else:
             print("\033[2K\033[1G", end="")
             print("Not implemented", end="")
@@ -680,13 +705,14 @@ class MultiLinePrinter:
                 line.busy = True
                 return line
         raise RuntimeError("No available lines")
-    
-    def free_line(self, line:PrinterLine) -> None:
+
+    def free_line(self, line: PrinterLine) -> None:
         line.busy = False
 
     def close(self) -> None:
         if "ipykernel" not in sys.modules:
             print()
+
 
 class PrinterLine:
 
