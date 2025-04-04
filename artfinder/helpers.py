@@ -23,6 +23,7 @@ from typing import (
     Callable,
     Coroutine,
     ParamSpec,
+    Iterator,
     Any,
 )
 from xml.etree.ElementTree import Element as EtreeElement
@@ -545,7 +546,7 @@ def full_texts(
 
 def full_texts_from_urls(
     urls: list[str], save_paths: list[str] | None = None, concurrent: int = 5
-) -> None:
+) -> tuple[list[str], list[str], list[tuple[str, str]]]:
     """
     Download full texts from URLs.
 
@@ -570,27 +571,26 @@ def full_texts_from_urls(
 
 async def _download_files(
     urls: list[str], save_paths: list[str], concurrent: int
-) -> None:
+) -> FileDownloader:
     """
     Actual download function.
+
+    Return
+    -------
+    tuple: List of downloaded files, restricted files, failed files.
     """
 
     concurrency_limit = asyncio.Semaphore(concurrent)
-    chunk_size = 1024
-    downloaded_files = 0
-    restricted_files = 0
-    faield_files = 0
-    printer = MultiLinePrinter(concurrent + 1)
-    total_line = printer.get_line()
-    total_line(f"Downloading {len(urls)} files...")
+    downloader = FileDownloader(urls, save_paths, concurency_limit=concurrent)
+    downloader.status_line(f"Downloading {len(urls)} files...")
 
     async def download_file(
-        session: ClientSession, url: str, save_path: str, task_id: int
+        session: ClientSession, downloader: FileDownloader, url: str, save_path: str
     ) -> None:
 
-        nonlocal downloaded_files, restricted_files, faield_files
+        filename = os.path.basename(save_path)
         async with concurrency_limit:
-            line = printer.get_line()
+            line = downloader.printer.get_line()
             async with session.get(url) as response:
                 if response.status == 200:
                     total_size = int(
@@ -600,7 +600,9 @@ async def _download_files(
 
                     with open(save_path, "wb") as f:
                         try:
-                            while chunk := await response.content.read(chunk_size):
+                            while chunk := await response.content.read(
+                                downloader.chunk_size
+                            ):
                                 f.write(chunk)
                                 downloaded_size += len(chunk)
                                 # Update progress for this task
@@ -609,44 +611,48 @@ async def _download_files(
                                     if total_size
                                     else 0
                                 )
-                                line(
-                                    f"Task {task_id}: Downloading: {progress:.2f}% ({downloaded_size/1024:.1f}/{total_size/1024:.1f} kb)"
-                                )
+                                # Format progress message
+                                if total_size:
+                                    line(
+                                        f"{filename}: Downloading: {progress:.2f}% ({downloaded_size/1024:.1f}/{total_size/1024:.1f} kb)"
+                                    )
+                                else:
+                                    line(
+                                        f"{filename}: Downloading: {downloaded_size/1024:.1f}"
+                                    )
                         except ClientError as e:
-                            line(f"Task {task_id}: Network error occurred: {e}")
+                            line(f"{filename}: Network error occurred: {e}")
                         except asyncio.IncompleteReadError as e:
-                            line(f"Task {task_id}: Incomplete read error: {e}")
-                    downloaded_files += 1
-                    line(f"Task {task_id}: File downloaded: {save_path}")
+                            line(f"{filename}: Incomplete read error: {e}")
+                    downloader.downloaded.append(url)
+                    line(f"{filename}: File downloaded: {save_path}")
                 elif response.status == 403:
-                    restricted_files += 1
-                    line(
-                        f"Task {task_id}: Access denied. HTTP status: {response.status}"
-                    )
+                    downloader.restricted.append(url)
+                    line(f"{filename}: Access denied. HTTP status: {response.status}")
+                elif response.status == 404:
+                    downloader.missing.append(url)
+                    line(f"{filename}: File not found. HTTP status: {response.status}")
                 else:
-                    faield_files += 1
+                    downloader.failed.append((url, response.status))
                     line(
-                        f"Task {task_id}: Failed to download file. HTTP status: {response.status}"
+                        f"{filename}: Failed to download file. HTTP status: {response.status}"
                     )
-            total_line(
-                f"{len(urls)} links. {downloaded_files} downloaded. {restricted_files} restricted. {faield_files} failed."
-            )
-            printer.print()
-            printer.free_line(line)
+            downloader.print_status()
+            line.free()
 
-    async def periodic_print() -> None:
+    async def periodic_print(downloader: FileDownloader) -> None:
         try:
             while True:
-                printer.print()
+                downloader.print_status()
                 await asyncio.sleep(0.1)
         except asyncio.CancelledError:
-            printer.close()
+            downloader.printer.close()
 
-    printer_task = asyncio.create_task(periodic_print())
+    printer_task = asyncio.create_task(periodic_print(downloader))
     async with ClientSession() as session:
         tasks = [
-            download_file(session, url, save_path, i)
-            for i, (url, save_path) in enumerate(zip(urls, save_paths))
+            download_file(session, downloader, url, save_path)
+            for url, save_path in downloader
         ]
         await asyncio.gather(*tasks)
     printer_task.cancel()
@@ -655,7 +661,7 @@ async def _download_files(
     except asyncio.CancelledError:
         pass
 
-    printer_task.cancel()
+    return downloader
 
 
 class LinePrinter:
@@ -732,3 +738,54 @@ class PrinterLine:
 
     def __call__(self, text: str) -> None:
         self.text = text
+
+    def free(self) -> None:
+        self.busy = False
+
+
+class FileDownloader:
+    """
+    Class to handle file downloading.
+    """
+
+    def __init__(
+        self, urls: list[str], save_paths: list[str], concurency_limit: int
+    ) -> None:
+        self.urls = urls
+        self.save_paths = save_paths
+        self.downloaded = []
+        self.restricted = []
+        self.missing = []
+        self.failed = []
+        self.concurrency_limit = concurency_limit
+        self.chunk_size = 1024
+        self.printer = MultiLinePrinter(self.concurrency_limit + 1)
+        self.status_line = self.printer.get_line()
+
+    def __iter__(self) -> Iterator[tuple[str, str]]:
+        return iter(zip(self.urls, self.save_paths))
+
+    @property
+    def processed_files_num(self) -> int:
+        return (
+            len(self.downloaded)
+            + len(self.restricted)
+            + len(self.missing)
+            + len(self.failed)
+        )
+
+    @property
+    def total_files_num(self) -> int:
+        return len(self.urls)
+
+    @property
+    def remaining_files_num(self) -> int:
+        return self.total_files_num - self.processed_files_num
+
+    def print_status(self) -> None:
+        self.status_line(
+            f"{self.total_files_num} links. {len(self.downloaded)} downloaded. "
+            + f"{len(self.restricted)} restricted. {len(self.missing)} missing. "
+            + f"{len(self.failed)} failed. {self.remaining_files_num} remaining."
+        )
+        self.printer.print()
