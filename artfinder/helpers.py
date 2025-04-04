@@ -672,7 +672,7 @@ class LinePrinter:
             self.display_id.update(text)
         else:
             print("\033[2K\033[1G", end="")
-            print(text, end="")
+            print(text, end="", flush=True)
 
     def close(self) -> None:
         if "ipykernel" not in sys.modules:
@@ -689,15 +689,22 @@ class MultiLinePrinter:
             self.display_id = cast(DisplayHandle, display(display_id=True))
         self.lines_no = lines
         self.lines = [PrinterLine(i, False) for i in range(lines)]
+        self.first_run = True
 
     def print(self) -> None:
         if "ipykernel" in sys.modules:
             self.display_id.update(
-                [print(line.text) for line in self.lines], clear=True
+                "\n".join(line.text for line in self.lines), clear=True
             )
         else:
-            print("\033[2K\033[1G", end="")
-            print("Not implemented", end="")
+            if not self.first_run:
+                # clear lines
+                print(f"\033[{self.lines_no - 1}A\033[1G\033[0J", end="")
+            # print lines
+            for i in range(self.lines_no - 1):
+                print(self.lines[i].text)
+            print(self.lines[-1].text, end="", flush=True)
+            self.first_run = False
 
     def get_line(self) -> PrinterLine:
         for line in self.lines:
@@ -711,6 +718,8 @@ class MultiLinePrinter:
 
     def close(self) -> None:
         if "ipykernel" not in sys.modules:
+            print()
+        else:
             print()
 
 
