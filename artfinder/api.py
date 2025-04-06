@@ -31,7 +31,6 @@ import aiohttp
 from aiohttp import ClientResponse, ClientSession
 import requests
 from crossref.restful import (
-    UrlSyntaxError,
     HTTPRequest,
 )
 from lxml import etree as xml
@@ -108,6 +107,7 @@ class ArtFinder:
 class Endpoint(ABC):
 
     ROW_LIMIT = 100
+    "Maximum articles to be retrieved in a single request."
 
     def __init__(
         self,
@@ -380,74 +380,40 @@ class Crossref(Endpoint):
 
     def query(self, **kwargs) -> Self:
         """
-        This method can be used compounded with filter method.
-
-        args: strings (String)
-
-        kwargs: valid FIELDS_QUERY arguments.
+        This method can be chained with filter method.
+        kwargs: CrossrefQueryField.
         """
 
         for field, value in kwargs.items():
             if field not in CrossrefQueryField:
-                msg = (
-                    f"Field query {field!s} specified but there is no such field query for"
-                    " this route."
-                    f" Valid field queries for this route are: {', '.join(self.FIELDS_QUERY)}"
-                )
-                raise UrlSyntaxError(
-                    msg,
-                )
-            request_params["query.%s" % field.replace("_", "-")] = value
+                raise ValueError("Invalid query field name")
+            self.request_params["query.%s" % field.replace("_", "-")] = value
 
-        return self.__class__(
-            request_url=request_url,
-            request_params=request_params,
-            context=context,
-            etiquette=self.etiquette,
-            timeout=self.timeout,
-        )
-
-    def filter(self, **kwargs):  # noqa: A003
+        return self.from_self()
+    
+    def author(self, author: str) -> Self:
         """
-        This method retrieve an iterable object that implements the method
-        __iter__. The arguments given will compose the parameters in the
-        request url.
-
-        This method can be used compounded and recursively with query, filter,
-        order, sort and facet methods.
-
-        kwargs: valid FILTER_VALIDATOR arguments. Replace `.` with `__` and
-        `-` with `_` when using parameters.
-
-        return: iterable object of Works metadata
-
-        Example:
-            >>> from crossref.restful import Works
-            >>> works = Works()
-            >>> query = works.filter(has_funder='true', has_license='true')
-            >>> for item in query:
-            ...     print(item['title'])
-            ...
-            ['Design of smiling-face-shaped band-notched UWB antenna']
-            ['Phase I clinical and pharmacokinetic ... tients with advanced solid tumors']
-            ...
+        Search by author.
         """
-        context = str(self.context)
-        request_url = build_url_endpoint(self.ENDPOINT, context)
-        request_params = dict(self.request_params)
 
-        for fltr, value in kwargs.items():
-            decoded_fltr = fltr.replace("__", ".").replace("_", "-")
-            if decoded_fltr not in self.FILTER_VALIDATOR.keys():
-                msg = (
-                    f"Filter {decoded_fltr!s} specified but there is no such filter for"
-                    f" this route. Valid filters for this route"
-                    f" are: {', '.join(self.FILTER_VALIDATOR.keys())}"
-                )
-                raise UrlSyntaxError(
-                    msg,
-                )
+        self.request_params["query." + CrossrefQueryField.AUTHOR] = author
+        return self.from_self()
+    
+    def search(self, query: str) -> Self:
+        """
+        Bibliographic search.
+        """
+        self.request_params["query." + CrossrefQueryField.BIBLIOGRAPHIC] = query
+        return self.from_self()
 
+    def filter(self, **kwargs) -> Self:
+        """
+        This method can be chained with query.
+        """
+
+        for field, value in kwargs.items():
+            if field not in CrossrefFilterField:
+                raise ValueError("Invalid filter field name")
             if self.FILTER_VALIDATOR[decoded_fltr] is not None:
                 if isinstance(value, list):
                     for v in value:
@@ -462,13 +428,7 @@ class Crossref(Endpoint):
                 else:
                     request_params["filter"] += "," + decoded_fltr + ":" + str(v)
 
-        return self.__class__(
-            request_url=request_url,
-            request_params=request_params,
-            context=context,
-            etiquette=self.etiquette,
-            timeout=self.timeout,
-        )
+        return self.from_self()
 
     async def _get_with_limit(
         self, dois: list[str], rate_limit: int = 10

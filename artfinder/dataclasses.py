@@ -26,7 +26,7 @@ class CrossrefResource(StrEnum):
 
 class CrossrefQueryField(StrEnum):
     """
-    A class to represent the Crossref API query fields.
+    Crossref query fields.
     """
 
     AFFILIATION = 'affiliation'
@@ -45,3 +45,66 @@ class CrossrefQueryField(StrEnum):
     PUBLICHER = 'publisher-name'
     PUBLISHER_LOCATION = 'publisher-location'
     TRANSLATOR = 'translator'
+
+class CrossrefFilterField(StrEnum):
+    """
+    Valid Crossref filter fields.
+    """
+
+    DOI = 'DOI'
+    ISBN = 'ISBN'
+    ISSN = 'ISSN'
+    URL = 'URL'
+    ABSTRACT = 'abstract'
+    ACCEPTED = 'accepted'
+    ALTERNATIVE_ID = 'alternative-id'
+    APPROVED = 'approved'
+    ARCHIVE = 'archive'
+    ARTICLE_NUMBER = 'article-number'
+    ASSERTION = 'assertion'
+    AUTHOR = 'author'
+    CHAIR = 'chair'
+    CLINICAL_TRIAL_NUMBER = 'clinical-trial-number'
+    CONTAINER_TITLE = 'container-title'
+    CONTENT_CREATED = 'content-created'
+    CONTENT_DOMAIN = 'content-domain'
+    CREATED = 'created'
+    DEGREE = 'degree'
+    DEPOSITED = 'deposited'
+    EDITOR = 'editor'
+    EVENT = 'event'
+    FUNDER = 'funder'
+    GROUP_TITLE = 'group-title'
+    INDEXED = 'indexed'
+    IS_REFERENCED_BY_COUNT = 'is-referenced-by-count'
+    ISSN_TYPE = 'issn-type'
+    ISSUE = 'issue'
+    ISSUED = 'issued'
+    LICENSE = 'license'
+    LINK = 'link'
+    MEMBER = 'member'
+    ORIGINAL_TITLE = 'original-title'
+    PAGE = 'page'
+    POSTED = 'posted'
+    PREFIX = 'prefix'
+    PUBLISHED = 'published'
+    PUBLISHED_ONLINE = 'published-online'
+    PUBLISHED_PRINT = 'published-print'
+    PUBLISHER = 'publisher'
+    PUBLISHER_LOCATION = 'publisher-location'
+    REFERENCE = 'reference'
+    REFERENCES_COUNT = 'references-count'
+    RELATION = 'relation'
+    SCORE = 'score'
+    SHORT_CONTAINER_TITLE = 'short-container-title'
+    SHORT_TITLE = 'short-title'
+    STANDARDS_BODY = 'standards-body'
+    SUBJECT = 'subject'
+    SUBTITLE = 'subtitle'
+    TITLE = 'title'
+    TYPE = 'type'
+    TRANSLATOR = 'translator'
+    UPDATE_POLICY = 'update-policy'
+    UPDATE_TO = 'update-to'
+    UPDATED_BY = 'updated-by'
+    VOLUME = 'volume'
