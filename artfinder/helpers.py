@@ -36,6 +36,7 @@ from aiohttp import ClientSession, ClientError
 from pandas import DataFrame
 import pandas as pd
 
+from artfinder.dataclasses import *
 Element: TypeAlias = Union[LxmlElement, EtreeElement]
 
 T = TypeVar("T", bound=Optional[str])
@@ -546,7 +547,7 @@ def full_texts(
 
 def full_texts_from_urls(
     urls: list[str], save_paths: list[str] | None = None, concurrent: int = 5
-) -> tuple[list[str], list[str], list[tuple[str, str]]]:
+) -> FileDownloader:
     """
     Download full texts from URLs.
 
@@ -566,102 +567,8 @@ def full_texts_from_urls(
         ]
     if len(urls) != len(save_paths):
         raise ValueError("Length of urls and save_paths must be the same.")
-    return _execute_coro(_download_files, urls, save_paths, concurrent)
-
-
-async def _download_files(
-    urls: list[str], save_paths: list[str], concurrent: int
-) -> FileDownloader:
-    """
-    Actual download function.
-
-    Return
-    -------
-    tuple: List of downloaded files, restricted files, failed files.
-    """
-
-    concurrency_limit = asyncio.Semaphore(concurrent)
-    downloader = FileDownloader(urls, save_paths, concurency_limit=concurrent)
-    downloader.status_line(f"Downloading {len(urls)} files...")
-
-    async def download_file(
-        session: ClientSession, downloader: FileDownloader, url: str, save_path: str
-    ) -> None:
-
-        filename = os.path.basename(save_path)
-        async with concurrency_limit:
-            line = downloader.printer.get_line()
-            async with session.get(url) as response:
-                if response.status == 200:
-                    total_size = int(
-                        response.headers.get("Content-Length", 0)
-                    )  # Get total file size
-                    downloaded_size = 0
-
-                    with open(save_path, "wb") as f:
-                        try:
-                            while chunk := await response.content.read(
-                                downloader.chunk_size
-                            ):
-                                f.write(chunk)
-                                downloaded_size += len(chunk)
-                                # Update progress for this task
-                                progress = (
-                                    (downloaded_size / total_size) * 100
-                                    if total_size
-                                    else 0
-                                )
-                                # Format progress message
-                                if total_size:
-                                    line(
-                                        f"{filename}: Downloading: {progress:.2f}% ({downloaded_size/1024:.1f}/{total_size/1024:.1f} kb)"
-                                    )
-                                else:
-                                    line(
-                                        f"{filename}: Downloading: {downloaded_size/1024:.1f}"
-                                    )
-                        except ClientError as e:
-                            line(f"{filename}: Network error occurred: {e}")
-                        except asyncio.IncompleteReadError as e:
-                            line(f"{filename}: Incomplete read error: {e}")
-                    downloader.downloaded.append(url)
-                    line(f"{filename}: File downloaded: {save_path}")
-                elif response.status == 403:
-                    downloader.restricted.append(url)
-                    line(f"{filename}: Access denied. HTTP status: {response.status}")
-                elif response.status == 404:
-                    downloader.missing.append(url)
-                    line(f"{filename}: File not found. HTTP status: {response.status}")
-                else:
-                    downloader.failed.append((url, response.status))
-                    line(
-                        f"{filename}: Failed to download file. HTTP status: {response.status}"
-                    )
-            downloader.print_status()
-            line.free()
-
-    async def periodic_print(downloader: FileDownloader) -> None:
-        try:
-            while True:
-                downloader.print_status()
-                await asyncio.sleep(0.1)
-        except asyncio.CancelledError:
-            downloader.printer.close()
-
-    printer_task = asyncio.create_task(periodic_print(downloader))
-    async with ClientSession() as session:
-        tasks = [
-            download_file(session, downloader, url, save_path)
-            for url, save_path in downloader
-        ]
-        await asyncio.gather(*tasks)
-    printer_task.cancel()
-    try:
-        await printer_task
-    except asyncio.CancelledError:
-        pass
-
-    return downloader
+    fdl = FileDownloader(urls, save_paths, concurrent)
+    return _execute_coro(fdl._download_files)
 
 
 class LinePrinter:
@@ -757,9 +664,9 @@ class FileDownloader:
         self.restricted = []
         self.missing = []
         self.failed = []
-        self.concurrency_limit = concurency_limit
+        self.concurrency_limiter = asyncio.Semaphore(concurency_limit)
         self.chunk_size = 1024
-        self.printer = MultiLinePrinter(self.concurrency_limit + 1)
+        self.printer = MultiLinePrinter(concurency_limit + 1)
         self.status_line = self.printer.get_line()
 
     def __iter__(self) -> Iterator[tuple[str, str]]:
@@ -775,17 +682,165 @@ class FileDownloader:
         )
 
     @property
-    def total_files_num(self) -> int:
+    def total_urls_num(self) -> int:
         return len(self.urls)
 
     @property
     def remaining_files_num(self) -> int:
-        return self.total_files_num - self.processed_files_num
+        return self.total_urls_num - self.processed_files_num
 
     def print_status(self) -> None:
         self.status_line(
-            f"{self.total_files_num} links. {len(self.downloaded)} downloaded. "
+            f"{self.total_urls_num} links. {len(self.downloaded)} downloaded. "
             + f"{len(self.restricted)} restricted. {len(self.missing)} missing. "
             + f"{len(self.failed)} failed. {self.remaining_files_num} remaining."
         )
         self.printer.print()
+
+    async def _download_files(self) -> FileDownloader:
+        """
+        Download files from the provided URLs and save them to the specified paths.
+
+        This method should not be called directly. Instead, use the `full_texts_from_urls` function or similar.
+
+        This method handles downloading files asynchronously with a specified level of concurrency.
+        It tracks the status of downloads, including successful downloads, restricted access,
+        missing files, and failed downloads.
+
+        Returns
+        -------
+        FileDownloader
+            The instance of the FileDownloader class with updated download status.
+
+        Notes
+        -----
+        - This method uses aiohttp for asynchronous HTTP requests.
+        - It provides real-time progress updates for each file being downloaded.
+        - Handles HTTP status codes to categorize downloads into different statuses:
+          - 200: Successful download.
+          - 403: Restricted access.
+          - 404: File not found.
+          - Other: Failed download with the corresponding HTTP status code.
+        - Progress is displayed using a MultiLinePrinter for better visualization.
+
+        Example
+        -------
+        >>> downloader = FileDownloader(urls, save_paths, 5)
+        >>> await downloader._download_files(urls, save_paths, 5)
+        """
+
+        self.status_line(f"Downloading {self.total_urls_num} files...")
+        printer_task = asyncio.create_task(self.periodic_print(.1))
+        async with ClientSession() as session:
+            tasks = [
+                self.download_file(session, url, save_path) for url, save_path in self
+            ]
+            await asyncio.gather(*tasks)
+        printer_task.cancel()
+        try:
+            await printer_task
+        except asyncio.CancelledError:
+            pass
+        return self
+
+    async def periodic_print(self, period: float) -> None:
+        """
+        Periodically print the download status.
+        """
+        try:
+            while True:
+                self.print_status()
+                await asyncio.sleep(period)
+        except asyncio.CancelledError:
+            self.printer.close()
+
+    async def download_file(
+        self, session: ClientSession, url: str, save_path: str
+    ) -> None:
+        """
+        Download a single file and update its status.
+
+        Parameters
+        ----------
+        session : ClientSession
+            The aiohttp session used for making HTTP requests.
+        url : str
+            The URL of the file to download.
+        save_path : str
+            The path where the downloaded file will be saved.
+        """
+
+        filename = os.path.basename(save_path)
+        async with self.concurrency_limiter:
+            line = self.printer.get_line()
+            async with session.get(url) as response:
+                if response.status == 200:
+                    total_size = int(
+                        response.headers.get("Content-Length", 0)
+                    )  # Get total file size
+                    downloaded_size = 0
+
+                    with open(save_path, "wb") as f:
+                        try:
+                            while chunk := await response.content.read(
+                                self.chunk_size
+                            ):
+                                f.write(chunk)
+                                downloaded_size += len(chunk)
+                                # Update progress for this task
+                                progress = (
+                                    (downloaded_size / total_size) * 100
+                                    if total_size
+                                    else 0
+                                )
+                                # Format progress message
+                                if total_size:
+                                    line(
+                                        f"{filename}: Downloading: {progress:.2f}% ({downloaded_size/1024:.1f}/{total_size/1024:.1f} kb)"
+                                    )
+                                else:
+                                    line(
+                                        f"{filename}: Downloading: {downloaded_size/1024:.1f}"
+                                    )
+                        except ClientError as e:
+                            line(f"{filename}: Network error occurred: {e}")
+                        except asyncio.IncompleteReadError as e:
+                            line(f"{filename}: Incomplete read error: {e}")
+                    self.downloaded.append(url)
+                    line(f"{filename}: File downloaded: {save_path}")
+                elif response.status == 403:
+                    self.restricted.append(url)
+                    line(f"{filename}: Access denied. HTTP status: {response.status}")
+                elif response.status == 404:
+                    self.missing.append(url)
+                    line(f"{filename}: File not found. HTTP status: {response.status}")
+                else:
+                    self.failed.append((url, response.status))
+                    line(
+                        f"{filename}: Failed to download file. HTTP status: {response.status}"
+                    )
+            self.print_status()
+            line.free()
+
+def build_cr_endpoint(endpoint: CrossrefResource, context: list[str] | None = None) -> str:
+    """
+    Build the Crossref API endpoint URL.
+
+    Parameters
+    ----------
+    endpoint : CrossrefResource
+        The specific endpoint to access.
+    context : list[str] | None
+        The context for the endpoint, e.g., additional path segments.
+
+    Returns
+    -------
+    url : str
+        The complete URL for the Crossref API endpoint.
+    """
+    if context:
+        endpoint_path = "/".join(part for part in (context + [endpoint]))
+    else:
+        endpoint_path = endpoint
+
+    return f"https://{CROSSREF_API_BASE}/{endpoint_path}"
