@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-import datetime
+from datetime import datetime
 import random
 import time
 import threading
@@ -128,7 +128,6 @@ class Endpoint(ABC):
         """
         self.rate_limits = rate_limits or self._update_rate_limits
         self.timeout = timeout
-
 
     @property
     @abstractmethod
@@ -313,9 +312,7 @@ class Endpoint(ABC):
     def init_params(self) -> set[str]:
         """Get list of parameters for initialization."""
 
-        return set(
-            ("etiquette", "request_params", "context", "rate_limits")
-        )
+        return set(("etiquette", "request_params", "context", "rate_limits"))
 
     def from_self(self, **kwargs) -> Self:
         """
@@ -390,7 +387,7 @@ class Crossref(Endpoint):
             self.request_params["query.%s" % field.replace("_", "-")] = value
 
         return self.from_self()
-    
+
     def author(self, author: str) -> Self:
         """
         Search by author.
@@ -398,7 +395,7 @@ class Crossref(Endpoint):
 
         self.request_params["query." + CrossrefQueryField.AUTHOR] = author
         return self.from_self()
-    
+
     def search(self, query: str) -> Self:
         """
         Bibliographic search.
@@ -409,24 +406,22 @@ class Crossref(Endpoint):
     def filter(self, **kwargs) -> Self:
         """
         This method can be chained with query.
+
+        Valid filter fields are in CrossrefFilterField enum.
         """
 
+        filter_validator = CrossrefFilterValidator()
         for field, value in kwargs.items():
-            if field not in CrossrefFilterField:
-                raise ValueError("Invalid filter field name")
-            if self.FILTER_VALIDATOR[decoded_fltr] is not None:
-                if isinstance(value, list):
-                    for v in value:
-                        self.FILTER_VALIDATOR[decoded_fltr](str(v))
-                else:
-                    self.FILTER_VALIDATOR[decoded_fltr](str(value))
-                    value = [value]
+            if isinstance(value, list):
+                validated_values = [filter_validator(field, v) for v in value]
+            else:
+                validated_values = [filter_validator(field, value)]
 
-            for i, v in enumerate(value):
-                if i == 0 and "filter" not in request_params:
-                    request_params["filter"] = decoded_fltr + ":" + str(v)
+            for i, v in enumerate(validated_values):
+                if i == 0 and "filter" not in self.request_params:
+                    self.request_params["filter"] = field + ":" + str(v)
                 else:
-                    request_params["filter"] += "," + decoded_fltr + ":" + str(v)
+                    self.request_params["filter"] += "," + field + ":" + str(v)
 
         return self.from_self()
 
@@ -557,13 +552,188 @@ class Crossref(Endpoint):
         print(f"Found {len(all_refs)} unique references.")
         return _execute_coro(self._get_with_limit, all_refs, rate_limit=concurrent_lim)
 
+
+class CrossrefFilterValidator:
+    """
+    Validate filter values
+    """
+
+    VALIDATORS = {
+        "alternative_id": "dummy",
+        "archive": "archive",
+        "article_number": "dummy",
+        "assertion": "dummy",
+        "assertion-group": "dummy",
+        "award.funder": "dummy",
+        "award.number": "dummy",
+        "category-name": "dummy",
+        "clinical-trial-number": "dummy",
+        "container-title": "dummy",
+        "content-domain": "dummy",
+        "directory": "directory",
+        "doi": "dummy",
+        "from-accepted-date": "is_date",
+        "from-created-date": "is_date",
+        "from-deposit-date": "is_date",
+        "from-event-end-date": "is_date",
+        "from-event-start-date": "is_date",
+        "from-index-date": "is_date",
+        "from-issued-date": "is_date",
+        "from-online-pub-date": "is_date",
+        "from-posted-date": "is_date",
+        "from-print-pub-date": "is_date",
+        "from-pub-date": "is_date",
+        "from-update-date": "is_date",
+        "full-text.application": "dummy",
+        "full-text.type": "dummy",
+        "full-text.version": "dummy",
+        "funder": "dummy",
+        "funder-doi-asserted-by": "dummy",
+        "group-title": "dummy",
+        "has-abstract": "is_bool",
+        "has-affiliation": "is_bool",
+        "has-archive": "is_bool",
+        "has-assertion": "is_bool",
+        "has-authenticated-orcid": "is_bool",
+        "has-award": "is_bool",
+        "has-clinical-trial-number": "is_bool",
+        "has-content-domain": "is_bool",
+        "has-domain-restriction": "is_bool",
+        "has-event": "is_bool",
+        "has-full-text": "is_bool",
+        "has-funder": "is_bool",
+        "has-funder-doi": "is_bool",
+        "has-license": "is_bool",
+        "has-orcid": "is_bool",
+        "has-references": "is_bool",
+        "has-relation": "is_bool",
+        "has-update": "is_bool",
+        "has-update-policy": "is_bool",
+        "is-update": "is_bool",
+        "isbn": "dummy",
+        "issn": "dummy",
+        "license.delay": "is_integer",
+        "license.url": "dummy",
+        "license.version": "dummy",
+        "location": "dummy",
+        "member": "is_integer",
+        "orcid": "dummy",
+        "prefix": "dummy",
+        "relation.object": "dummy",
+        "relation.object-type": "dummy",
+        "relation.type": "dummy",
+        "type": "correct_doc_type",
+        "type-name": "dummy",
+        "until-accepted-date": "is_date",
+        "until-created-date": "is_date",
+        "until-deposit-date": "is_date",
+        "until-event-end-date": "is_date",
+        "until-event-start-date": "is_date",
+        "until-index-date": "is_date",
+        "until-issued-date": "is_date",
+        "until-online-pub-date": "is_date",
+        "until-posted-date": "is_date",
+        "until-print-pub-date": "is_date",
+        "until-pub-date": "is_date",
+        "until-update-date": "is_date",
+        "update-type": "dummy",
+        "updates": "dummy",
+    }
+
+    def __call__(self, filter: str, value: str) -> Any:
+        if value not in self.VALIDATORS:
+            raise ValueError(f"Invalid filter {filter}. Valid filters: {self.VALIDATORS.keys()}")
+        try:
+            return getattr(self, self.VALIDATORS[filter])(value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid value for filter {filter}: {exc.args[0]}") from exc
+
+    @staticmethod
+    def dummy(value: T) -> T:
+        return value
+
+    @staticmethod
+    def is_date(value: str) -> datetime:
+        """
+        Validate date format.
+        """
+        try:
+            return datetime.strptime(value, "%Y")
+        except ValueError:
+            try:
+                return datetime.strptime(value, "%Y-%m")
+            except ValueError:
+                try:
+                    return datetime.strptime(value, "%Y-%m-%d")
+                except ValueError as exc:
+                    raise ValueError(f"Invalid date {value}.")
+
+    @staticmethod
+    def is_integer(value: str|int) -> int:
+        """
+        Validate integer format.
+        """
+        try:
+            value = int(value)
+            if value >= 0:
+                return value
+            raise ValueError(f"Numerica value should be positive, but got: {value}")
+        except ValueError:
+            raise ValueError(f"Expected integer, but got: {value}")
+
+    @staticmethod
+    def is_bool(value: str | int) -> bool:
+
+        true_vals = ["True", "true", "1"]
+        false_vals = ["False", "false", "0"]
+
+        if str(value) in true_vals:
+            return True
+        if str(value) in false_vals:
+            return False
+        raise ValueError(
+            f"Expected boolean, but got: {value}. Expected values: {expected}"
+        )
+
+    @staticmethod
+    def correct_doc_type(value: str) -> str:
+        """
+        Validate document type.
+        """
+        if value in DocumentType:
+            return value
+        raise ValueError(
+            f"Invalid document type {value}. Valid values are: {[doc.value for doc in DocumentType]}"
+        )
+    
+    @staticmethod
+    def archive(value: str) -> str:
+        expected = ("Portico", "CLOCKSS", "DWT")
+
+        if str(value) in expected:
+            return value
+
+        raise ValueError(f"Invalid archive {value}. Valid values are: {expected}")
+
+    @staticmethod
+    def directory(value: str) -> str:
+        expected = "DOAJ"
+
+        if str(value) in expected:
+            return value
+
+        msg = "Directory specified as {} but must be one of: {}".format(str(value), ", ".join(expected))
+        raise ValueError(
+            msg,
+        )
+
 class Etiquette:
     def __init__(
-            self,
-            application_name="undefined",
-            application_version="undefined",
-            application_url="undefined",
-            contact_email="anonymous",
+        self,
+        application_name="undefined",
+        application_version="undefined",
+        application_url="undefined",
+        contact_email="anonymous",
     ):
         self.application_name = application_name
         self.application_version = application_version
@@ -577,12 +747,14 @@ class Etiquette:
             self.application_url,
             self.contact_email,
         )
+
     def header(self) -> dict[str, str]:
         """
         This method returns the etiquette header.
         """
 
         return {"user-agent": str(self)}
+
 
 @typechecked
 class PubMed:

@@ -46,7 +46,7 @@ class CrossrefQueryField(StrEnum):
     PUBLISHER_LOCATION = 'publisher-location'
     TRANSLATOR = 'translator'
 
-class CrossrefFilterField(StrEnum):
+class CrossrefSelectField(StrEnum):
     """
     Valid Crossref filter fields.
     """
@@ -108,3 +108,33 @@ class CrossrefFilterField(StrEnum):
     UPDATE_TO = 'update-to'
     UPDATED_BY = 'updated-by'
     VOLUME = 'volume'
+
+class DocumentType(StrEnum):
+    """Valid document types."""
+
+    BOOK = 'book'
+    BOOK_CHAPTER = 'book-chapter'
+    BOOK_SET = 'book-set'
+    BOOK_SERIES = 'book-series'
+    BOOK_PART = 'book-part'
+    BOOK_SECTION = 'book-section'
+    BOOK_TRACK = 'book-track'
+    REFERENCE_BOOK = 'reference-book'
+    EDITED_BOOK = 'edited-book'
+    MONOGRAPH = 'monograph'
+    REPORT = 'report'
+    PROCEEDINGS = 'proceedings'
+    PROCEEDINGS_ARTICLE = 'proceedings-article'
+    JOURNAL = 'journal'
+    JOURNAL_ARTICLE = 'journal-article'
+    JOURNAL_VOLUME = 'journal-volume'
+    JOURNAL_ISSUE = 'journal-issue'
+    OTHER = 'other'
+    REFERENCE_ENTRY = 'reference-entry'
+    COMPONENT = 'component'
+    REPORT_SERIES = 'report-series'
+    STANDARD = 'standard'
+    STANDARD_SERIES = 'standard-series'
+    POSTER_CONTENT = 'poster-content'
+    DISSERTATION = 'dissertation'
+    DATASET = 'dataset'
