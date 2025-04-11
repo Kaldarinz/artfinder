@@ -822,36 +822,4 @@ class FileDownloader:
             line.free()
 
 
-def build_cr_endpoint(
-    resource: CrossrefResource,
-    endpoint: str | list[str] | None = None,
-    context: list[str] | None = None,
-) -> str:
-    """
-    Build the Crossref API endpoint URL.
 
-    Parameters
-    ----------
-    endpoint : CrossrefResource
-        The specific endpoint to access.
-    context : list[str] | None
-        The context for the endpoint, e.g., additional path segments.
-
-    Returns
-    -------
-    url : str
-        The complete URL for the Crossref API endpoint.
-    """
-
-    if endpoint and not isinstance(endpoint, list):
-        endpoint = [endpoint]
-    if context and endpoint:
-        endpoint_path = "/".join(part for part in (*context, resource, *endpoint))
-    elif context:
-        endpoint_path = "/".join(part for part in (*context, resource))
-    elif endpoint:
-        endpoint_path = "/".join(part for part in (resource, *endpoint))
-    else:
-        endpoint_path = resource
-
-    return f"https://{CROSSREF_API_BASE}/{endpoint_path}"

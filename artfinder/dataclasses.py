@@ -1,7 +1,7 @@
 from typing import NamedTuple
 from enum import StrEnum
 
-CROSSREF_API_BASE = 'api.crossref.org'
+
 
 class CrossrefRateLimit(NamedTuple):
     """
