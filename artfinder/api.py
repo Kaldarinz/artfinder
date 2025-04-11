@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta, date
 import random
 import time
 import threading
@@ -80,7 +80,7 @@ class ArtFinder:
         -------
         None
         """
-        self.cr = Crossref(email=email, app="artfinder")
+        self.cr = Crossref(email=email)
 
     def find_article(
         self,
@@ -101,6 +101,7 @@ class ArtFinder:
             return self.cr.query(
                 bibliographic=re.sub(r"\W+", "+", title.strip())
             ).get_df()
+        raise NotImplementedError("function not implemented yet")
 
 
 @typechecked
@@ -114,8 +115,8 @@ class Endpoint(ABC):
         context: list[str] | None = None,
         request_params: dict[str, Any] | None = None,
         etiquette: Etiquette | None = None,
-        rate_limits: CrossrefRateLimit | None = None,
         timeout: int = 30,
+        **kwargs
     ):
         self.do_http_request = HTTPRequest().do_http_request
         self.etiquette = etiquette or Etiquette()
@@ -126,12 +127,12 @@ class Endpoint(ABC):
         'works' as the endpoint will result in querying from 
         api.crossref.org/types/journal-article/works
         """
-        self.rate_limits = rate_limits or self._update_rate_limits
         self.timeout = timeout
+        
 
     @property
     @abstractmethod
-    def ENDPOINT(self) -> CrossrefResource:
+    def RESOURCE(self) -> CrossrefResource:
         """
         This property should be implemented in the child class.
         """
@@ -139,11 +140,12 @@ class Endpoint(ABC):
 
     @property
     def _update_rate_limits(self) -> CrossrefRateLimit:
+        print(f"Updating rate limits")
         result = self.do_http_request(
             method="get",
-            endpoint=self.request_url,
+            endpoint=self.request_endpoint,
             only_headers=True,
-            custom_header=self.custom_header,
+            custom_header=self.etiquette.header(),
             timeout=self.timeout,
         )
         return CrossrefRateLimit(
@@ -185,9 +187,9 @@ class Endpoint(ABC):
         """
         result = self.do_http_request(
             method="get",
-            endpoint=self.request_url,
+            endpoint=self.request_endpoint,
             data=self.request_params,
-            custom_header=self.custom_header,
+            custom_header=self.etiquette.header(),
             timeout=self.timeout,
         ).json()
 
@@ -214,14 +216,13 @@ class Endpoint(ABC):
             1
         """
         request_params = dict(self.request_params)
-        request_url = str(self.request_url)
         request_params["rows"] = 0
 
         result = self.do_http_request(
             method="get",
-            endpoint=request_url,
+            endpoint=self.request_endpoint,
             data=request_params,
-            custom_header=self.custom_header,
+            custom_header=self.etiquette.header(),
             timeout=self.timeout,
         ).json()
 
@@ -254,17 +255,22 @@ class Endpoint(ABC):
 
         sorted_request_params = sorted([(k, v) for k, v in self.request_params.items()])
         req = requests.Request(
-            "get", self.request_url, params=sorted_request_params
+            "get", self.request_endpoint, params=sorted_request_params
         ).prepare()
 
         return req.url
+
+    @property
+    def request_endpoint(self) -> str:
+        """Request endpoint for http request."""
+        return build_cr_endpoint(resource=self.RESOURCE, context=self.context)
 
     def __iter__(self):
 
         if any(value in self.request_params for value in ["sample", "rows"]):
             result = self.do_http_request(
                 method="get",
-                endpoint=build_cr_endpoint(self.ENDPOINT, self.context),
+                endpoint=self.request_endpoint,
                 data=self.request_params,
                 custom_header=self.etiquette.header(),
                 timeout=self.timeout,
@@ -288,7 +294,7 @@ class Endpoint(ABC):
             while True:
                 result = self.do_http_request(
                     method="get",
-                    endpoint=build_cr_endpoint(self.ENDPOINT, self.context),
+                    endpoint=build_cr_endpoint(self.RESOURCE, self.context),
                     data=request_params,
                     custom_header=self.etiquette.header(),
                     timeout=self.timeout,
@@ -333,6 +339,7 @@ class Endpoint(ABC):
 class Crossref(Endpoint):
     """Wrap around the Crossref API."""
 
+
     def __init__(self, email: str | None = None, *args, **kwargs) -> None:
         """
         Initialize the Crossref object.
@@ -358,8 +365,14 @@ class Crossref(Endpoint):
                 application_name=self.app, contact_email=self.email
             )
             kwargs["etiquette"] = self.etiquette
-        kwargs["resource"] = CrossrefResource.WORKS
         super().__init__(*args, **kwargs)
+
+        self.rate_limits = kwargs.get('rate_limits') or self._update_rate_limits
+
+    @property
+    def RESOURCE(self) -> CrossrefResource:
+        """works endpoint."""
+        return CrossrefResource.WORKS
 
     def get_df(self) -> DataFrame:
         """
@@ -446,7 +459,7 @@ class Crossref(Endpoint):
             List of doi that failed to fetch.
         """
 
-        urls = [build_url_endpoint(endpoint=doi, context="works") for doi in dois]
+        urls = [build_cr_endpoint(resource=self.RESOURCE, endpoint=doi) for doi in dois]
         tot_urls = len(urls)
         failed_doi = []
 
@@ -692,7 +705,7 @@ class CrossrefFilterValidator:
         if str(value) in false_vals:
             return False
         raise ValueError(
-            f"Expected boolean, but got: {value}. Expected values: {expected}"
+            f"Expected boolean, but got: {value}. Expected values: {true_vals + false_vals}"
         )
 
     @staticmethod
@@ -792,7 +805,7 @@ class PubMed:
         # Keep track of the rate limit
         self._rateLimit: int = 3
         self._maxRetries: int = 10
-        self._requestsMade: list[datetime.datetime] = []
+        self._requestsMade: list[datetime] = []
         self.parameters: dict[str, str | int | list[str]]
         # Define the standard / default query parameters
         self.parameters = {"tool": tool, "email": email, "db": "pubmed"}
@@ -923,7 +936,7 @@ class PubMed:
         self._requestsMade = [
             requestTime
             for requestTime in self._requestsMade
-            if requestTime > datetime.datetime.now() - datetime.timedelta(seconds=1)
+            if requestTime > datetime.now() - timedelta(seconds=1)
         ]
 
         # Return whether we've made more requests in the last second,
@@ -997,7 +1010,7 @@ class PubMed:
                 logger.debug(f"Response status code: {response.status_code}")
 
                 # Add this request to the list of requests made
-                self._requestsMade.append(datetime.datetime.now())
+                self._requestsMade.append(datetime.now())
 
                 # Return the response
                 if output == "json":
@@ -1018,8 +1031,8 @@ class PubMed:
     def _getArticleIdsMonth(
         self,
         search_term: str,
-        range_begin_date: datetime.date,
-        range_end_date: datetime.date,
+        range_begin_date: date,
+        range_end_date: date,
     ) -> list[str]:
         article_ids = []
         range_dates_month = get_range_months(range_begin_date, range_end_date)

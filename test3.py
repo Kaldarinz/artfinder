@@ -1,7 +1,3 @@
-from artfinder.helpers import build_cr_endpoint
-from artfinder.dataclasses import *
+import artfinder
 
-print([e.value for e in DocumentType])
-
-
-
+af = artfinder.ArtFinder()

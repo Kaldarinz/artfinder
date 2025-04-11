@@ -37,6 +37,7 @@ from pandas import DataFrame
 import pandas as pd
 
 from artfinder.dataclasses import *
+
 Element: TypeAlias = Union[LxmlElement, EtreeElement]
 
 T = TypeVar("T", bound=Optional[str])
@@ -730,7 +731,7 @@ class FileDownloader:
         """
 
         self.status_line(f"Downloading {self.total_urls_num} files...")
-        printer_task = asyncio.create_task(self.periodic_print(.1))
+        printer_task = asyncio.create_task(self.periodic_print(0.1))
         async with ClientSession() as session:
             tasks = [
                 self.download_file(session, url, save_path) for url, save_path in self
@@ -782,9 +783,7 @@ class FileDownloader:
 
                     with open(save_path, "wb") as f:
                         try:
-                            while chunk := await response.content.read(
-                                self.chunk_size
-                            ):
+                            while chunk := await response.content.read(self.chunk_size):
                                 f.write(chunk)
                                 downloaded_size += len(chunk)
                                 # Update progress for this task
@@ -822,7 +821,12 @@ class FileDownloader:
             self.print_status()
             line.free()
 
-def build_cr_endpoint(endpoint: CrossrefResource, context: list[str] | None = None) -> str:
+
+def build_cr_endpoint(
+    resource: CrossrefResource,
+    endpoint: str | list[str] | None = None,
+    context: list[str] | None = None,
+) -> str:
     """
     Build the Crossref API endpoint URL.
 
@@ -838,9 +842,16 @@ def build_cr_endpoint(endpoint: CrossrefResource, context: list[str] | None = No
     url : str
         The complete URL for the Crossref API endpoint.
     """
-    if context:
-        endpoint_path = "/".join(part for part in (context + [endpoint]))
+
+    if endpoint and not isinstance(endpoint, list):
+        endpoint = [endpoint]
+    if context and endpoint:
+        endpoint_path = "/".join(part for part in (*context, resource, *endpoint))
+    elif context:
+        endpoint_path = "/".join(part for part in (*context, resource))
+    elif endpoint:
+        endpoint_path = "/".join(part for part in (resource, *endpoint))
     else:
-        endpoint_path = endpoint
+        endpoint_path = resource
 
     return f"https://{CROSSREF_API_BASE}/{endpoint_path}"
