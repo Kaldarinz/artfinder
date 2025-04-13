@@ -5,13 +5,9 @@ from __future__ import annotations
 import datetime
 import re
 import sys
-import os
-import threading
-from queue import Queue
-import asyncio
 
 try:
-    from IPython.display import DisplayHandle, display, clear_output
+    from IPython.display import DisplayHandle, display
 except ImportError:
     ...
 from typing import (
@@ -32,14 +28,9 @@ import lxml.etree
 from lxml.etree import _Element as LxmlElement
 from typeguard import typechecked
 from typing_extensions import TypeAlias
-from aiohttp import ClientSession, ClientError
 from pandas import DataFrame
 import pandas as pd
 
-from artfinder.dataclasses import *
-from artfinder.http_requests import _execute_coro
-
-from artfinder import VERSION
 
 Element: TypeAlias = Union[LxmlElement, EtreeElement]
 
@@ -515,47 +506,6 @@ def pretty_print_xml(xml: LxmlElement) -> None:
     _print_tags_recursively(xml)
 
 
-def full_texts(
-    df: DataFrame, dois: list[str], save_paths: list[str] | None = None
-) -> None:
-    """
-    Download full texts from DOIs.
-
-    Parameters
-    ----------
-    dois: List[str]
-        List of DOIs to download.
-    save_paths: List[str]
-        List of paths to save the downloaded files.
-    """
-
-    pass
-
-
-def full_texts_from_urls(
-    urls: list[str], save_paths: list[str] | None = None, concurrent: int = 5
-) -> FileDownloader:
-    """
-    Download full texts from URLs.
-
-    Parameters
-    ----------
-    urls: List[str]
-        List of URLs to download.
-    save_paths: List[str]
-        List of paths to save the downloaded files.
-    concurrent: int
-        Number of concurrent downloads.
-    """
-    if save_paths is None:
-        save_paths = [
-            os.path.join("download", "file_" + str(i) + ".pdf")
-            for i in range(len(urls))
-        ]
-    if len(urls) != len(save_paths):
-        raise ValueError("Length of urls and save_paths must be the same.")
-    fdl = FileDownloader(urls, save_paths, concurrent)
-    return _execute_coro(fdl._download_files)
 
 
 class LinePrinter:
@@ -635,202 +585,3 @@ class PrinterLine:
 
     def free(self) -> None:
         self.busy = False
-
-
-class FileDownloader:
-    """
-    Class to handle file downloading.
-    """
-
-    def __init__(
-        self, urls: list[str], save_paths: list[str], concurency_limit: int
-    ) -> None:
-        self.urls = urls
-        self.save_paths = save_paths
-        self.downloaded = []
-        self.restricted = []
-        self.missing = []
-        self.failed = []
-        self.concurrency_limiter = asyncio.Semaphore(concurency_limit)
-        self.chunk_size = 1024
-        self.printer = MultiLinePrinter(concurency_limit + 1)
-        self.status_line = self.printer.get_line()
-
-    def __iter__(self) -> Iterator[tuple[str, str]]:
-        return iter(zip(self.urls, self.save_paths))
-
-    @property
-    def processed_files_num(self) -> int:
-        return (
-            len(self.downloaded)
-            + len(self.restricted)
-            + len(self.missing)
-            + len(self.failed)
-        )
-
-    @property
-    def total_urls_num(self) -> int:
-        return len(self.urls)
-
-    @property
-    def remaining_files_num(self) -> int:
-        return self.total_urls_num - self.processed_files_num
-
-    def print_status(self) -> None:
-        self.status_line(
-            f"{self.total_urls_num} links. {len(self.downloaded)} downloaded. "
-            + f"{len(self.restricted)} restricted. {len(self.missing)} missing. "
-            + f"{len(self.failed)} failed. {self.remaining_files_num} remaining."
-        )
-        self.printer.print()
-
-    async def _download_files(self) -> FileDownloader:
-        """
-        Download files from the provided URLs and save them to the specified paths.
-
-        This method should not be called directly. Instead, use the `full_texts_from_urls` function or similar.
-
-        This method handles downloading files asynchronously with a specified level of concurrency.
-        It tracks the status of downloads, including successful downloads, restricted access,
-        missing files, and failed downloads.
-
-        Returns
-        -------
-        FileDownloader
-            The instance of the FileDownloader class with updated download status.
-
-        Notes
-        -----
-        - This method uses aiohttp for asynchronous HTTP requests.
-        - It provides real-time progress updates for each file being downloaded.
-        - Handles HTTP status codes to categorize downloads into different statuses:
-          - 200: Successful download.
-          - 403: Restricted access.
-          - 404: File not found.
-          - Other: Failed download with the corresponding HTTP status code.
-        - Progress is displayed using a MultiLinePrinter for better visualization.
-
-        Example
-        -------
-        >>> downloader = FileDownloader(urls, save_paths, 5)
-        >>> await downloader._download_files(urls, save_paths, 5)
-        """
-
-        self.status_line(f"Downloading {self.total_urls_num} files...")
-        printer_task = asyncio.create_task(self.periodic_print(0.1))
-        async with ClientSession() as session:
-            tasks = [
-                self.download_file(session, url, save_path) for url, save_path in self
-            ]
-            await asyncio.gather(*tasks)
-        printer_task.cancel()
-        try:
-            await printer_task
-        except asyncio.CancelledError:
-            pass
-        return self
-
-    async def periodic_print(self, period: float) -> None:
-        """
-        Periodically print the download status.
-        """
-        try:
-            while True:
-                self.print_status()
-                await asyncio.sleep(period)
-        except asyncio.CancelledError:
-            self.printer.close()
-
-    async def download_file(
-        self, session: ClientSession, url: str, save_path: str
-    ) -> None:
-        """
-        Download a single file and update its status.
-
-        Parameters
-        ----------
-        session : ClientSession
-            The aiohttp session used for making HTTP requests.
-        url : str
-            The URL of the file to download.
-        save_path : str
-            The path where the downloaded file will be saved.
-        """
-
-        filename = os.path.basename(save_path)
-        async with self.concurrency_limiter:
-            line = self.printer.get_line()
-            async with session.get(url) as response:
-                if response.status == 200:
-                    total_size = int(
-                        response.headers.get("Content-Length", 0)
-                    )  # Get total file size
-                    downloaded_size = 0
-
-                    with open(save_path, "wb") as f:
-                        try:
-                            while chunk := await response.content.read(self.chunk_size):
-                                f.write(chunk)
-                                downloaded_size += len(chunk)
-                                # Update progress for this task
-                                progress = (
-                                    (downloaded_size / total_size) * 100
-                                    if total_size
-                                    else 0
-                                )
-                                # Format progress message
-                                if total_size:
-                                    line(
-                                        f"{filename}: Downloading: {progress:.2f}% ({downloaded_size/1024:.1f}/{total_size/1024:.1f} kb)"
-                                    )
-                                else:
-                                    line(
-                                        f"{filename}: Downloading: {downloaded_size/1024:.1f}"
-                                    )
-                        except ClientError as e:
-                            line(f"{filename}: Network error occurred: {e}")
-                        except asyncio.IncompleteReadError as e:
-                            line(f"{filename}: Incomplete read error: {e}")
-                    self.downloaded.append(url)
-                    line(f"{filename}: File downloaded: {save_path}")
-                elif response.status == 403:
-                    self.restricted.append(url)
-                    line(f"{filename}: Access denied. HTTP status: {response.status}")
-                elif response.status == 404:
-                    self.missing.append(url)
-                    line(f"{filename}: File not found. HTTP status: {response.status}")
-                else:
-                    self.failed.append((url, response.status))
-                    line(
-                        f"{filename}: Failed to download file. HTTP status: {response.status}"
-                    )
-            self.print_status()
-            line.free()
-
-
-class Etiquette:
-    def __init__(
-        self,
-        application_name: str = "undefined",
-        application_url: str = "undefined",
-        contact_email: str | None = None,
-    ):
-        self.application_name = application_name
-        self.application_version = VERSION
-        self.application_url = application_url
-        self.contact_email = contact_email or "anon"
-
-    def __str__(self):
-        return "{}/{} ({}; mailto:{})".format(
-            self.application_name,
-            self.application_version,
-            self.application_url,
-            self.contact_email,
-        )
-
-    def header(self) -> dict[str, str]:
-        """
-        This method returns the etiquette header.
-        """
-
-        return {"user-agent": str(self)}

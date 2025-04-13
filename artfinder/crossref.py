@@ -41,6 +41,7 @@ class Endpoint(ABC):
         self.do_http_request = AsyncHTTPRequest(email).async_get
         self.request_params = request_params or {}
         self.context = context
+        self.email = email
         """
         Context for the request. e.g. context=['types', 'journal-article'] and
         RESOURCE='works' will result in querying from 
@@ -201,7 +202,10 @@ class Endpoint(ABC):
                 if len(result["message"]["items"]) == 0:
                     print("Empty result.")
                     return
-
+                else:
+                    print(
+                        f"Found {len(result['message']['items'])} items."
+                    )
                 for item in result["message"]["items"]:
                     yield item
 
@@ -210,7 +214,7 @@ class Endpoint(ABC):
     def init_params(self) -> set[str]:
         """Get list of parameters for initialization."""
 
-        return set(("email", "request_params", "context", "rate_limits"))
+        return set(("email", "request_params", "context"))
 
     def from_self(self, **kwargs) -> Self:
         """

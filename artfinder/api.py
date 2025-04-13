@@ -41,7 +41,6 @@ from artfinder.helpers import (
     get_range_years,
     get_search_term,
 )
-from artfinder import VERSION
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 logger = logging.getLogger(__name__)
