@@ -30,7 +30,6 @@ def build_cr_endpoint(
 
     Returns
     -------
-    str
         The complete URL for the Crossref API endpoint.
 
     Examples

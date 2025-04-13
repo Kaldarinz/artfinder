@@ -22,34 +22,24 @@ from typing import (
     Literal,
     Self,
 )
-from abc import ABC, abstractmethod
 from ast import literal_eval
-import asyncio
 import re
 
-import aiohttp
-from aiohttp import ClientResponse, ClientSession
 import requests
-from crossref.restful import (
-    HTTPRequest,
-)
 from lxml import etree as xml
 from typeguard import typechecked
 import pandas as pd
 from pandas import DataFrame
 
 from artfinder.article import PubMedArticle, CrossrefArticle
-from artfinder.dataclasses import *
+from artfinder.crossref import Crossref
 from artfinder.helpers import (
-    build_cr_endpoint,
     arrange_query,
     batches,
     get_range_date_from_query,
     get_range_months,
     get_range_years,
     get_search_term,
-    LinePrinter,
-    _execute_coro,
 )
 from artfinder import VERSION
 

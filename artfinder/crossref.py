@@ -10,10 +10,21 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Self, TypeVar
+import logging
 
 import requests
+import pandas as pd
+from pandas import DataFrame
 
-from artfinder.dataclasses import CrossrefResource, CrossrefRateLimit
+from artfinder.dataclasses import CrossrefResource, CrossrefQueryField, DocumentType
+from artfinder.http_requests import AsyncHTTPRequest
+from artfinder.crossref_helpers import build_cr_endpoint
+from artfinder.article import CrossrefArticle
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
 
 class Endpoint(ABC):
 
@@ -24,21 +35,17 @@ class Endpoint(ABC):
         self,
         context: list[str] | None = None,
         request_params: dict[str, Any] | None = None,
-        etiquette: Etiquette | None = None,
-        timeout: int = 30,
-        **kwargs
+        email: str | None = None,
+        **kwargs,
     ):
-        self.do_http_request = HTTPRequest().do_http_request
-        self.etiquette = etiquette or Etiquette()
+        self.do_http_request = AsyncHTTPRequest(email).async_get
         self.request_params = request_params or {}
         self.context = context
         """
         Context for the request. e.g. context=['types', 'journal-article'] and
-        'works' as the endpoint will result in querying from 
+        RESOURCE='works' will result in querying from 
         api.crossref.org/types/journal-article/works
         """
-        self.timeout = timeout
-        
 
     @property
     @abstractmethod
@@ -47,21 +54,6 @@ class Endpoint(ABC):
         This property should be implemented in the child class.
         """
         pass
-
-    @property
-    def _update_rate_limits(self) -> CrossrefRateLimit:
-        print(f"Updating rate limits")
-        result = self.do_http_request(
-            method="get",
-            endpoint=self.request_endpoint,
-            only_headers=True,
-            custom_header=self.etiquette.header(),
-            timeout=self.timeout,
-        )
-        return CrossrefRateLimit(
-            limit=result.headers.get("x-rate-limit-limit", "undefined"),
-            interval=result.headers.get("x-rate-limit-interval", "undefined"),
-        )
 
     @property
     def request_params(self) -> dict[str, Any]:
@@ -80,7 +72,7 @@ class Endpoint(ABC):
 
     def _escaped_pagging(self) -> None:
         """
-        This method remove the offset and rows parameters from the
+        This method removes the offset and rows parameters from the
         request_params dictionary.
         This is used to build the url attribute.
         """
@@ -95,13 +87,13 @@ class Endpoint(ABC):
         """
         This attribute retrieve the API version.
         """
-        result = self.do_http_request(
-            method="get",
-            endpoint=self.request_endpoint,
-            data=self.request_params,
-            custom_header=self.etiquette.header(),
-            timeout=self.timeout,
-        ).json()
+        result = (
+            self.do_http_request(
+                urls=self.request_endpoint,
+                params=self.request_params,
+            ).get(self.request_endpoint)
+            or {}
+        )
 
         return result.get("message_version", "undefined")
 
@@ -128,15 +120,15 @@ class Endpoint(ABC):
         request_params = dict(self.request_params)
         request_params["rows"] = 0
 
-        result = self.do_http_request(
-            method="get",
-            endpoint=self.request_endpoint,
-            data=request_params,
-            custom_header=self.etiquette.header(),
-            timeout=self.timeout,
-        ).json()
+        result = (
+            self.do_http_request(
+                urls=self.request_endpoint,
+                params=request_params,
+            ).get(self.request_endpoint)
+            or {}
+        )
 
-        return int(result["message"]["total-results"])
+        return int(result.get("message", {}).get("total-results"))
 
     @property
     def url(self):
@@ -179,22 +171,16 @@ class Endpoint(ABC):
 
         if any(value in self.request_params for value in ["sample", "rows"]):
             result = self.do_http_request(
-                method="get",
-                endpoint=self.request_endpoint,
-                data=self.request_params,
-                custom_header=self.etiquette.header(),
-                timeout=self.timeout,
-            )
+                urls=self.request_endpoint,
+                params=self.request_params,
+            ).get(self.request_endpoint)
 
-            if result.status_code == 404:
-                print("Not found any result.")
+            if result is None:
+                print("Found nothing.")
                 return
-
-            result = result.json()
 
             for item in result["message"]["items"]:
                 yield item
-
             return
 
         else:
@@ -202,19 +188,15 @@ class Endpoint(ABC):
             request_params["cursor"] = "*"
             request_params["rows"] = self.ROW_LIMIT
             while True:
+                url = build_cr_endpoint(self.RESOURCE, self.context)
                 result = self.do_http_request(
-                    method="get",
-                    endpoint=build_cr_endpoint(self.RESOURCE, self.context),
-                    data=request_params,
-                    custom_header=self.etiquette.header(),
-                    timeout=self.timeout,
-                )
+                    urls=url,
+                    params=request_params,
+                ).get(url)
 
-                if result.status_code == 404:
-                    print("Not found any result.")
+                if result is None:
+                    print("Found nothing.")
                     return
-
-                result = result.json()
 
                 if len(result["message"]["items"]) == 0:
                     print("Empty result.")
@@ -228,7 +210,7 @@ class Endpoint(ABC):
     def init_params(self) -> set[str]:
         """Get list of parameters for initialization."""
 
-        return set(("etiquette", "request_params", "context", "rate_limits"))
+        return set(("email", "request_params", "context", "rate_limits"))
 
     def from_self(self, **kwargs) -> Self:
         """
@@ -245,39 +227,8 @@ class Endpoint(ABC):
         return self.__class__(**params)
 
 
-@typechecked
 class Crossref(Endpoint):
     """Wrap around the Crossref API."""
-
-
-    def __init__(self, email: str | None = None, *args, **kwargs) -> None:
-        """
-        Initialize the Crossref object.
-
-        Parameters
-        ----------
-        email: str
-            email of the user of the tool. This parameter
-            is not required but kindly requested by Crossref.
-        app: str
-            name of the application that is executing the query.
-            This parameter is not required but kindly requested by Crossref.
-
-        Returns
-        -------
-        None
-        """
-
-        if kwargs.get("etiquette") is None:
-            self.email = email or "anonymous"
-            self.app = "artfinder"
-            self.etiquette = Etiquette(
-                application_name=self.app, contact_email=self.email
-            )
-            kwargs["etiquette"] = self.etiquette
-        super().__init__(*args, **kwargs)
-
-        self.rate_limits = kwargs.get('rate_limits') or self._update_rate_limits
 
     @property
     def RESOURCE(self) -> CrossrefResource:
@@ -348,116 +299,16 @@ class Crossref(Endpoint):
 
         return self.from_self()
 
-    async def _get_with_limit(
-        self, dois: list[str], rate_limit: int = 10
-    ) -> tuple[DataFrame, list[str]]:
-        """
-        Get a list of urls with a rate limit.
-
-        Parameters
-        ----------
-        dois: list[str]
-            List of articles doi to fetch.
-        rate_limit: int
-            Maximum number of requests per second.
-
-        Returns
-        -------
-        DataFrame
-            DataFrame with the results.
-        list[str]
-            List of doi that failed to fetch.
-        """
-
-        urls = [build_cr_endpoint(resource=self.RESOURCE, endpoint=doi) for doi in dois]
-        tot_urls = len(urls)
-        failed_doi = []
-
-        concur_limit = 5
-        timeout_daley = 15
-        concur_requests_limit = asyncio.Semaphore(concur_limit)
-        timeout = asyncio.Event()
-        timeout.set()
-        last_fetch = time.time()
-        printer = LinePrinter()
-
-        async def fetch(session: ClientSession, url: str) -> dict:
-            """
-            Fetch a single article.
-            """
-            try:
-                async with session.get(
-                    url, headers={"User-Agent": str(self.etiquette)}
-                ) as response:
-                    if response.status == 200:
-                        return await response.json()
-                    # TODO: to handle 429 error properly, we should check current limits from headers
-                    if response.status == 429:
-                        logger.error(f"Rate limit exceeded for {url}")
-                        # TODO: delay should be started from the laset recieved 429 error, not the first
-                        if timeout.is_set():
-                            timeout.clear()
-                            await asyncio.sleep(delay=timeout_daley)
-                            timeout.set()
-                        return {}
-                    else:
-                        logger.error(f"Error fetching {url}: {response.status}")
-                        return {}
-            except Exception as e:
-                logger.error(f"Error fetching {url}: {e}")
-                return {}
-
-        async def fetch_with_limit(
-            session: aiohttp.ClientSession, url: str, article_index: int
-        ) -> CrossrefArticle | None:
-            """
-            Scheduled launch of article fetch with rate limit.
-            """
-
-            nonlocal last_fetch
-            # respect concurrent requests limit
-            async with concur_requests_limit:
-                # wait for timeout if 429 error occured
-                await timeout.wait()
-                cur_time = time.time()
-                if (cur_time - last_fetch) < (1 / rate_limit):
-                    # wait until the next request can be made
-                    await asyncio.sleep((1 / rate_limit) - (cur_time - last_fetch))
-                # print progress in single line
-                printer(f"{(article_index + 1)}/{tot_urls}: {url}")
-                last_fetch = time.time()
-                result = await fetch(session, url)
-                if len(result):
-                    try:
-                        return CrossrefArticle(result["message"])
-                    except Exception as e:
-                        logger.error(f"Error parsing {url}: {e}")
-                        failed_doi.append(dois[urls.index(url)])
-                        return None
-
-        async with ClientSession() as session:
-            tasks = [fetch_with_limit(session, url, i) for i, url in enumerate(urls)]
-            results = await asyncio.gather(*tasks)
-            try:
-                df = pd.concat(
-                    (result.to_df() for result in results if result is not None)
-                )
-                printer(f"Obtained {len(df)} article{'s' if len(df) > 1 else ''}.")
-                return df, failed_doi
-            except ValueError:
-                printer("No articles obtained.")
-                return pd.DataFrame(), failed_doi
-            finally:
-                printer.close()
-
     def get_dois(
-        self, dois: list[str], concurrent_lim: int = 50
+        self, dois: list[str]
     ) -> tuple[DataFrame, list[str]]:
         """
         Get all articles from a list of DOIs as dataframe.
         """
 
-        return _execute_coro(self._get_with_limit, dois, rate_limit=concurrent_lim)
+        # Get all articles from a list of DOIs
+        urls = build_cr_endpoint(CrossrefResource.WORKS, endpoint=dois)
+        raise NotImplementedError("This method is not implemented yet.")
 
     def get_refs(
         self, df: DataFrame, concurrent_lim: int = 50
@@ -467,6 +318,7 @@ class Crossref(Endpoint):
         """
 
         # Get all references from articles in the DataFrame
+        raise NotImplementedError("This method is not implemented yet.")
         all_refs = []
         for article in df["references"]:
             if article is not None:
@@ -481,6 +333,7 @@ class CrossrefFilterValidator:
     Validate filter values
     """
 
+    # TODO: change it for using pydantic
     VALIDATORS = {
         "alternative_id": "dummy",
         "archive": "archive",
@@ -565,11 +418,15 @@ class CrossrefFilterValidator:
 
     def __call__(self, filter: str, value: str) -> Any:
         if value not in self.VALIDATORS:
-            raise ValueError(f"Invalid filter {filter}. Valid filters: {self.VALIDATORS.keys()}")
+            raise ValueError(
+                f"Invalid filter {filter}. Valid filters: {self.VALIDATORS.keys()}"
+            )
         try:
             return getattr(self, self.VALIDATORS[filter])(value)
         except ValueError as exc:
-            raise ValueError(f"Invalid value for filter {filter}: {exc.args[0]}") from exc
+            raise ValueError(
+                f"Invalid value for filter {filter}: {exc.args[0]}"
+            ) from exc
 
     @staticmethod
     def dummy(value: T) -> T:
@@ -592,7 +449,7 @@ class CrossrefFilterValidator:
                     raise ValueError(f"Invalid date {value}.")
 
     @staticmethod
-    def is_integer(value: str|int) -> int:
+    def is_integer(value: str | int) -> int:
         """
         Validate integer format.
         """
@@ -628,7 +485,7 @@ class CrossrefFilterValidator:
         raise ValueError(
             f"Invalid document type {value}. Valid values are: {[doc.value for doc in DocumentType]}"
         )
-    
+
     @staticmethod
     def archive(value: str) -> str:
         expected = ("Portico", "CLOCKSS", "DWT")
@@ -645,34 +502,9 @@ class CrossrefFilterValidator:
         if str(value) in expected:
             return value
 
-        msg = "Directory specified as {} but must be one of: {}".format(str(value), ", ".join(expected))
+        msg = "Directory specified as {} but must be one of: {}".format(
+            str(value), ", ".join(expected)
+        )
         raise ValueError(
             msg,
         )
-
-class Etiquette:
-    def __init__(
-        self,
-        application_name="undefined",
-        application_url="undefined",
-        contact_email="anonymous",
-    ):
-        self.application_name = application_name
-        self.application_version = VERSION
-        self.application_url = application_url
-        self.contact_email = contact_email
-
-    def __str__(self):
-        return "{}/{} ({}; mailto:{})".format(
-            self.application_name,
-            self.application_version,
-            self.application_url,
-            self.contact_email,
-        )
-
-    def header(self) -> dict[str, str]:
-        """
-        This method returns the etiquette header.
-        """
-
-        return {"user-agent": str(self)}

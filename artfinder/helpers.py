@@ -37,6 +37,9 @@ from pandas import DataFrame
 import pandas as pd
 
 from artfinder.dataclasses import *
+from artfinder.http_requests import _execute_coro
+
+from artfinder import VERSION
 
 Element: TypeAlias = Union[LxmlElement, EtreeElement]
 
@@ -512,23 +515,6 @@ def pretty_print_xml(xml: LxmlElement) -> None:
     _print_tags_recursively(xml)
 
 
-def _execute_coro(func: Callable[P, Coroutine[Any, Any, TA]], *args, **kwargs) -> TA:
-    """
-    Launch function asyncronously in separate thread.
-    """
-
-    result_queue = Queue()
-
-    def get_func():
-        result = asyncio.run(func(*args, **kwargs))
-        result_queue.put(result)
-
-    thread = threading.Thread(target=get_func)
-    thread.start()
-    thread.join()
-    return result_queue.get()
-
-
 def full_texts(
     df: DataFrame, dois: list[str], save_paths: list[str] | None = None
 ) -> None:
@@ -822,4 +808,29 @@ class FileDownloader:
             line.free()
 
 
+class Etiquette:
+    def __init__(
+        self,
+        application_name: str = "undefined",
+        application_url: str = "undefined",
+        contact_email: str | None = None,
+    ):
+        self.application_name = application_name
+        self.application_version = VERSION
+        self.application_url = application_url
+        self.contact_email = contact_email or "anon"
 
+    def __str__(self):
+        return "{}/{} ({}; mailto:{})".format(
+            self.application_name,
+            self.application_version,
+            self.application_url,
+            self.contact_email,
+        )
+
+    def header(self) -> dict[str, str]:
+        """
+        This method returns the etiquette header.
+        """
+
+        return {"user-agent": str(self)}
