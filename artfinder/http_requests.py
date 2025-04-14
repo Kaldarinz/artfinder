@@ -313,6 +313,42 @@ class AsyncHTTPRequest:
             timeout=timeout,
             print_progress=print_progress,
         )
+    
+    def get(
+        self,
+        url: str,
+        params: dict[str, str] | None = None,
+        only_headers: bool = False,
+        timeout: int = 60,
+        print_progress: bool = True,
+    ) -> dict:
+        """
+        Make HTTP request.
+
+        Parameters
+        ----------
+        url : str
+            URLs to request.
+        params : dict[str, str] | str | None, optional
+            Parameters to pass to the request. The same params will be passsed to all requests.
+        only_headers : bool, optional
+            If True, only the headers will be returned.
+        timeout : int, optional
+            The timeout for the request in seconds.
+        print_progress : bool, optional
+            If True, print progress.
+
+        Returns
+        -------
+        Response body.
+        """
+        return self.async_get(
+            urls=url,
+            params=params,
+            only_headers=only_headers,
+            timeout=timeout,
+            print_progress=print_progress,
+        ).get(url, {}) or {}
 
 
 class FileDownloader:

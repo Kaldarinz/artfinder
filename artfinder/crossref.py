@@ -42,9 +42,11 @@ class Endpoint(ABC):
     ):
         self.printer = MultiLinePrinter(self.CONCURRENCY_LIMIT + 1)
         self.status_line = self.printer.get_line()
-        self.do_http_request = AsyncHTTPRequest(
+        ahttpr = AsyncHTTPRequest(
             email=email, concurrency_limit=self.CONCURRENCY_LIMIT, printer=self.printer
-        ).async_get
+        )
+        self.async_get = ahttpr.async_get
+        self.get = ahttpr.get
         self.request_params = request_params or {}
         self.context = context
         self.email = email
@@ -95,11 +97,10 @@ class Endpoint(ABC):
         This attribute retrieve the API version.
         """
         result = (
-            self.do_http_request(
-                urls=self.request_endpoint,
+            self.get(
+                url=self.request_endpoint,
                 params=self.request_params,
-            ).get(self.request_endpoint)
-            or {}
+            )
         )
 
         return result.get("message_version", "undefined")
@@ -127,16 +128,14 @@ class Endpoint(ABC):
         request_params = dict(self.request_params)
         request_params["rows"] = 0
 
-        result = (
-            self.do_http_request(
-                urls=self.request_endpoint,
+        result = self.get(
+                url=self.request_endpoint,
                 params=request_params,
-            ).get(self.request_endpoint)
-            or {}
-        )
+            )
+            
+
         
         num_found = int(result.get("message", {}).get("total-results"))
-        print(f"Found {num_found} items.")
         self.status_line(f'Found {num_found} items.')
     
         return num_found
@@ -181,10 +180,10 @@ class Endpoint(ABC):
     def __iter__(self) -> Generator[dict[str, str], None, None]:
 
             if any(value in self.request_params for value in ["sample", "rows"]):
-                result = self.do_http_request(
-                    urls=self.request_endpoint,
+                result = self.get(
+                    url=self.request_endpoint,
                     params=self.request_params,
-                ).get(self.request_endpoint)
+                )
 
                 if result is None:
                     print("Found nothing.")
@@ -202,10 +201,10 @@ class Endpoint(ABC):
                 self.status_line('Fetching items...')
                 while True:
                     url = build_cr_endpoint(self.RESOURCE, self.context)
-                    result = self.do_http_request(
-                        urls=url,
+                    result = self.get(
+                        url=url,
                         params=request_params,
-                    ).get(url)
+                    )
 
                     if result is None:
                         self.status_line("Found nothing.")

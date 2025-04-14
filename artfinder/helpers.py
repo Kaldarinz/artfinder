@@ -560,19 +560,21 @@ class MultiLinePrinter:
     """
 
     def __init__(self, lines: int) -> None:
-        if "ipykernel" in sys.modules:
-            self.display_id = cast(DisplayHandle, display(display_id=True))
         self.lines_no = lines
         self.lines = [PrinterLine(i, False, self) for i in range(lines)]
         self.first_run = True
 
     def print(self) -> None:
         if "ipykernel" in sys.modules:
+            if not hasattr(self, "display_id"):
+                self.display_id = cast(DisplayHandle, display(display_id=True))
             clear_output(wait=True)
-            print('\n'.join(line.text for line in self.lines))
-            """ self.display_id.update(
-                '\n'.join(line.text for line in self.lines), clear=True
-            ) """
+            print(
+                "\n".join(
+                    (self.lines[i].text for i in range(self._max_non_empty_index() + 1))
+                )
+            )
+
         else:
             if not self.first_run:
                 # clear lines
