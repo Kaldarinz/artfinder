@@ -20,7 +20,7 @@ from artfinder.dataclasses import CrossrefResource, CrossrefQueryField, Document
 from artfinder.http_requests import AsyncHTTPRequest
 from artfinder.crossref_helpers import build_cr_endpoint
 from artfinder.article import CrossrefArticle
-from artfinder.helpers import LinePrinter
+from artfinder.helpers import LinePrinter, MultiLinePrinter
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ class Endpoint(ABC):
 
     ROW_LIMIT = 100
     "Maximum articles to be retrieved in a single request."
+    CONCURRENCY_LIMIT = 5
 
     def __init__(
         self,
@@ -39,7 +40,11 @@ class Endpoint(ABC):
         email: str | None = None,
         **kwargs,
     ):
-        self.do_http_request = AsyncHTTPRequest(email).async_get
+        self.printer = MultiLinePrinter(self.CONCURRENCY_LIMIT + 1)
+        self.status_line = self.printer.get_line()
+        self.do_http_request = AsyncHTTPRequest(
+            email=email, concurrency_limit=self.CONCURRENCY_LIMIT, printer=self.printer
+        ).async_get
         self.request_params = request_params or {}
         self.context = context
         self.email = email
@@ -129,8 +134,12 @@ class Endpoint(ABC):
             ).get(self.request_endpoint)
             or {}
         )
-
-        return int(result.get("message", {}).get("total-results"))
+        
+        num_found = int(result.get("message", {}).get("total-results"))
+        print(f"Found {num_found} items.")
+        self.status_line(f'Found {num_found} items.')
+    
+        return num_found
 
     @property
     def url(self):
@@ -171,7 +180,6 @@ class Endpoint(ABC):
 
     def __iter__(self) -> Generator[dict[str, str], None, None]:
 
-        with LinePrinter() as printer:
             if any(value in self.request_params for value in ["sample", "rows"]):
                 result = self.do_http_request(
                     urls=self.request_endpoint,
@@ -191,6 +199,7 @@ class Endpoint(ABC):
                 request_params["cursor"] = "*"
                 request_params["rows"] = self.ROW_LIMIT
                 items_obtained = 0
+                self.status_line('Fetching items...')
                 while True:
                     url = build_cr_endpoint(self.RESOURCE, self.context)
                     result = self.do_http_request(
@@ -199,20 +208,20 @@ class Endpoint(ABC):
                     ).get(url)
 
                     if result is None:
-                        printer("Found nothing.")
+                        self.status_line("Found nothing.")
                         return
 
                     if len(result["message"]["items"]) == 0:
                         if items_obtained == 0:
-                            printer("Empty result.")
+                            self.status_line("Empty result.")
                         else:
-                            printer(
+                            self.status_line(
                                 f"Found {items_obtained} item{'s' if items_obtained > 1 else ''}."
                             )
                         return
                     else:
                         items_obtained += len(result["message"]["items"])
-                        printer(
+                        self.status_line(
                             f"Found {items_obtained} item{'s' if items_obtained > 1 else ''}. Fetching more..."
                         )
                     for item in result["message"]["items"]:

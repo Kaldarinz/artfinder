@@ -8,7 +8,7 @@ import sys
 from ast import literal_eval
 
 try:
-    from IPython.display import DisplayHandle, display
+    from IPython.display import DisplayHandle, display, clear_output
 except ImportError:
     ...
 from typing import (
@@ -30,7 +30,6 @@ from typeguard import typechecked
 from typing_extensions import TypeAlias
 from pandas import DataFrame
 import pandas as pd
-
 
 
 Element: TypeAlias = Union[LxmlElement, EtreeElement]
@@ -507,8 +506,6 @@ def pretty_print_xml(xml: LxmlElement) -> None:
     _print_tags_recursively(xml)
 
 
-
-
 class LinePrinter:
     """
     A utility class for printing text on the same line in the terminal.
@@ -550,7 +547,7 @@ class LinePrinter:
 
     def __enter__(self) -> LinePrinter:
         return self
-    
+
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self.close()
         if exc_type is not None:
@@ -566,23 +563,38 @@ class MultiLinePrinter:
         if "ipykernel" in sys.modules:
             self.display_id = cast(DisplayHandle, display(display_id=True))
         self.lines_no = lines
-        self.lines = [PrinterLine(i, False) for i in range(lines)]
+        self.lines = [PrinterLine(i, False, self) for i in range(lines)]
         self.first_run = True
 
     def print(self) -> None:
         if "ipykernel" in sys.modules:
-            self.display_id.update(
-                "\n".join(line.text for line in self.lines), clear=True
-            )
+            clear_output(wait=True)
+            print('\n'.join(line.text for line in self.lines))
+            """ self.display_id.update(
+                '\n'.join(line.text for line in self.lines), clear=True
+            ) """
         else:
             if not self.first_run:
                 # clear lines
-                print(f"\033[{self.lines_no - 1}A\033[1G\033[0J", end="")
+                print(
+                    f"\033[{self._max_non_empty_index() + 1}A\033[1G\033[0J",
+                    end="",
+                    flush=True,
+                )
             # print lines
-            for i in range(self.lines_no - 1):
+            for i in range(self._max_non_empty_index() + 1):
                 print(self.lines[i].text)
             print(self.lines[-1].text, end="", flush=True)
             self.first_run = False
+
+    def _max_non_empty_index(self) -> int:
+        """
+        Get the index of the last busy line.
+        """
+        for i in range(self.lines_no - 1, -1, -1):
+            if self.lines[i].text:
+                return i
+        return -1
 
     def get_line(self) -> PrinterLine:
         for line in self.lines:
@@ -603,16 +615,45 @@ class MultiLinePrinter:
 
 class PrinterLine:
 
-    def __init__(self, id: int, busy: bool) -> None:
+    def __init__(self, id: int, busy: bool, printer: MultiLinePrinter) -> None:
+        """
+        Initialize a PrinterLine instance.
+
+        Parameters
+        ----------
+        id : int
+            The unique identifier for the printer line.
+        busy : bool
+            Indicates whether the line is currently in use.
+        printer : MultiLinePrinter
+            The parent MultiLinePrinter instance managing this line.
+        """
         self.id = id
         self.busy = busy
         self.text = ""
+        self.printer = printer
 
     def __call__(self, text: str) -> None:
         self.text = text
+        self.printer.print()
 
     def free(self) -> None:
         self.busy = False
+
+    def update(self, text: str) -> None:
+        """
+        Only update line text, do not print it.
+        """
+        self.text = text
+
+    def __enter__(self) -> PrinterLine:
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.free()
+        if exc_type is not None:
+            raise exc_value
+
 
 def strict_filter(title: str) -> bool:
 

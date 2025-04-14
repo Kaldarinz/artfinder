@@ -19,7 +19,7 @@ import pandas as pd
 from pandas import DataFrame
 
 from artfinder.dataclasses import CrossrefRateLimit
-from artfinder.helpers import LinePrinter, MultiLinePrinter
+from artfinder.helpers import LinePrinter, MultiLinePrinter, PrinterLine
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ P = ParamSpec("P")
 
 class AsyncHTTPRequest:
     """
-    Asynchronous HTTP request class for making requests.
+    Asynchronous HTTP request class for making get requests.
     """
 
     def __init__(
@@ -39,6 +39,7 @@ class AsyncHTTPRequest:
         concurrency_limit: int = 5,
         concurrency_timeout: int = 15,
         max_retries: int = 5,
+        printer: MultiLinePrinter | None = None,
     ) -> None:
         """
         Initialize the AsyncHTTPRequest class.
@@ -61,6 +62,7 @@ class AsyncHTTPRequest:
         self.concurrency_timeout = concurrency_timeout
         self.etiquette = Etiquette(contact_email=email)
         self.max_retries = max_retries
+        self.printer = printer or MultiLinePrinter(concurrency_limit + 1)
 
     def _update_rate_limits(self, headers: dict[str, str]):
 
@@ -82,6 +84,17 @@ class AsyncHTTPRequest:
             interval_value = interval_value * 60 * 60
 
         self.rate_limit = CrossrefRateLimit(rate_limit, interval_value)
+
+    async def periodic_print(self, period: float) -> None:
+        """
+        Periodically print the download status.
+        """
+        try:
+            while True:
+                self.printer.print()
+                await asyncio.sleep(period)
+        except asyncio.CancelledError:
+            self.printer.close()
 
     async def _get(
         self,
@@ -131,11 +144,9 @@ class AsyncHTTPRequest:
         # Track the time of the last request
         last_fetch_time = time()
 
-        # Initialize a progress printer if enabled
-        if print_progress:
-            printer = LinePrinter()
-
-        async def fetch(session: ClientSession, url: str) -> dict | None:
+        async def fetch(
+            session: ClientSession, url: str, printer_line: PrinterLine
+        ) -> dict | None:
             """
             Fetch a single article.
             This function is called by fetch_with_limit().
@@ -155,6 +166,7 @@ class AsyncHTTPRequest:
 
             left_retries = self.max_retries
             nonlocal rate_limit_extra_timeout, rate_limited_start_time
+            # with printer_line as printer_line:
             try:
                 while left_retries:
                     if only_headers:
@@ -171,7 +183,9 @@ class AsyncHTTPRequest:
                             self._update_rate_limits(dict(response.headers))
                             if only_headers:
                                 return dict(response.headers)
-                            return await response.json()
+                            result = await response.json()
+                            printer_line(f"Fetched {url}")
+                            return result
                         # if the response is 429, wait for the rate limit and retry
                         elif response.status == 429:
                             # if allowed_by_rate_limit is set, then clear it for at
@@ -201,13 +215,13 @@ class AsyncHTTPRequest:
                                     rate_limit_extra_timeout = additional_timeout
                         # retry for internal server errors
                         elif 500 <= response.status < 600:
-                            logger.warning(f"Server error {response.status} for {url}")
+                            printer_line(f"Server error {response.status} for {url}")
                         # return None for all other errors
                         else:
                             logger.error(f"Error fetching {url}: {response.status}")
                             return
                     left_retries -= 1
-                    logger.info(f"Retrying {url}, {left_retries} retries left")
+                    printer_line(f"Retrying {url}, {left_retries} retries left")
                 logger.error(f"Max retries exceeded for {url}")
                 return
             except Exception as e:
@@ -236,36 +250,29 @@ class AsyncHTTPRequest:
             """
 
             nonlocal last_fetch_time
-            # respect concurrent requests limit
-            async with concur_requests_limit:
-                # wait for timeout if 429 error occured
-                await allowed_by_rate_limit.wait()
-                cur_time = time()
-                # wait until the next request can be made
-                if (
-                    delay := (
-                        self.rate_limit.interval / self.rate_limit.limit
-                        - (cur_time - last_fetch_time)
-                    )
-                    > 0
-                ):
-                    await asyncio.sleep(delay)
-                if print_progress:
-                    printer(f"Fetching {(index + 1)}/{tot_urls}: {url}")
-                last_fetch_time = time()
-                return url, await fetch(session, url)
+            with self.printer.get_line() as printer_line:
+                # respect concurrent requests limit
+                async with concur_requests_limit:
+                    # wait for timeout if 429 error occured
+                    await allowed_by_rate_limit.wait()
+                    cur_time = time()
+                    # wait until the next request can be made
+                    if (
+                        (delay :=
+                            self.rate_limit.interval / self.rate_limit.limit
+                            - (cur_time - last_fetch_time)
+                        )
+                        > 0
+                    ):
+                        await asyncio.sleep(delay)
+                    if print_progress:
+                        printer_line(f"Fetching {(index + 1)}/{tot_urls}: {url}")
+                    last_fetch_time = time()
+                    return url, await fetch(session, url, printer_line)
 
         async with ClientSession() as session:
             tasks = [fetch_with_limit(session, url, i) for i, url in enumerate(urls)]
             results = await asyncio.gather(*tasks)
-            if print_progress:
-                tot_results = len(
-                    [result for result in results if result[1] is not None]
-                )
-                printer(
-                    f"Obtained {tot_results} result{'s' if tot_results > 1 else ''}."
-                )
-                printer.close()
         return {result[0]: result[1] for result in results}
 
     def async_get(
@@ -430,7 +437,7 @@ class FileDownloader:
 
         filename = os.path.basename(save_path)
         async with self.concurrency_limiter:
-            line = self.printer.get_line()
+            progress_line = self.printer.get_line()
             async with session.get(url) as response:
                 if response.status == 200:
                     total_size = int(
@@ -451,32 +458,36 @@ class FileDownloader:
                                 )
                                 # Format progress message
                                 if total_size:
-                                    line(
+                                    progress_line(
                                         f"{filename}: Downloading: {progress:.2f}% ({downloaded_size/1024:.1f}/{total_size/1024:.1f} kb)"
                                     )
                                 else:
-                                    line(
+                                    progress_line(
                                         f"{filename}: Downloading: {downloaded_size/1024:.1f}"
                                     )
                         except ClientError as e:
-                            line(f"{filename}: Network error occurred: {e}")
+                            progress_line(f"{filename}: Network error occurred: {e}")
                         except asyncio.IncompleteReadError as e:
-                            line(f"{filename}: Incomplete read error: {e}")
+                            progress_line(f"{filename}: Incomplete read error: {e}")
                     self.downloaded.append(url)
-                    line(f"{filename}: File downloaded: {save_path}")
+                    progress_line(f"{filename}: File downloaded: {save_path}")
                 elif response.status == 403:
                     self.restricted.append(url)
-                    line(f"{filename}: Access denied. HTTP status: {response.status}")
+                    progress_line(
+                        f"{filename}: Access denied. HTTP status: {response.status}"
+                    )
                 elif response.status == 404:
                     self.missing.append(url)
-                    line(f"{filename}: File not found. HTTP status: {response.status}")
+                    progress_line(
+                        f"{filename}: File not found. HTTP status: {response.status}"
+                    )
                 else:
                     self.failed.append((url, response.status))
-                    line(
+                    progress_line(
                         f"{filename}: Failed to download file. HTTP status: {response.status}"
                     )
             self.print_status()
-            line.free()
+            progress_line.free()
 
 
 class Etiquette:
