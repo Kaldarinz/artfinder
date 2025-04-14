@@ -556,7 +556,39 @@ class LinePrinter:
 
 class MultiLinePrinter:
     """
-    Class to handle printing on the same line.
+    A class for handling dynamic multi-line printing that works in both terminal and Jupyter environments.
+
+    MultiLinePrinter manages multiple lines of text that can be updated in-place, with different
+    implementations for terminal environments (using ANSI escape codes) and Jupyter notebooks
+    (using IPython's display functionality).
+
+    Designed for printing progress during async callls.
+
+    Parameters
+    ----------
+    lines : int
+        The number of lines to manage.
+
+    Attributes
+    ----------
+    lines_no : int
+        The total number of lines managed by the printer.
+    lines : List[PrinterLine]
+        The list of PrinterLine objects representing each line.
+    first_run : bool
+        Flag indicating if this is the first print operation.
+    display_id : DisplayHandle, optional
+        Handle for display in Jupyter environments.
+
+    Usage:
+    ------
+    ```python
+    printer = MultiLinePrinter(2)
+    line1 = printer.get_line()
+    line1("Processing line 1...")
+    with printer.get_line() as line2:
+        line2("Processing line 2...")
+    printer.close()
     """
 
     def __init__(self, lines: int) -> None:
