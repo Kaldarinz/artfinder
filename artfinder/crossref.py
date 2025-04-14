@@ -9,7 +9,7 @@ email: a.popov.fizteh@gmail.com
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Self, TypeVar
+from typing import Any, Self, TypeVar, cast, Generator
 import logging
 
 import requests
@@ -20,6 +20,7 @@ from artfinder.dataclasses import CrossrefResource, CrossrefQueryField, Document
 from artfinder.http_requests import AsyncHTTPRequest
 from artfinder.crossref_helpers import build_cr_endpoint
 from artfinder.article import CrossrefArticle
+from artfinder.helpers import LinePrinter
 
 logger = logging.getLogger(__name__)
 
@@ -168,48 +169,56 @@ class Endpoint(ABC):
         """Request endpoint for http request."""
         return build_cr_endpoint(resource=self.RESOURCE, context=self.context)
 
-    def __iter__(self):
+    def __iter__(self) -> Generator[dict[str, str], None, None]:
 
-        if any(value in self.request_params for value in ["sample", "rows"]):
-            result = self.do_http_request(
-                urls=self.request_endpoint,
-                params=self.request_params,
-            ).get(self.request_endpoint)
-
-            if result is None:
-                print("Found nothing.")
-                return
-
-            for item in result["message"]["items"]:
-                yield item
-            return
-
-        else:
-            request_params = dict(self.request_params)
-            request_params["cursor"] = "*"
-            request_params["rows"] = self.ROW_LIMIT
-            while True:
-                url = build_cr_endpoint(self.RESOURCE, self.context)
+        with LinePrinter() as printer:
+            if any(value in self.request_params for value in ["sample", "rows"]):
                 result = self.do_http_request(
-                    urls=url,
-                    params=request_params,
-                ).get(url)
+                    urls=self.request_endpoint,
+                    params=self.request_params,
+                ).get(self.request_endpoint)
 
                 if result is None:
                     print("Found nothing.")
                     return
 
-                if len(result["message"]["items"]) == 0:
-                    print("Empty result.")
-                    return
-                else:
-                    print(
-                        f"Found {len(result['message']['items'])} items."
-                    )
                 for item in result["message"]["items"]:
                     yield item
+                return
 
-                request_params["cursor"] = result["message"]["next-cursor"]
+            else:
+                request_params = dict(self.request_params)
+                request_params["cursor"] = "*"
+                request_params["rows"] = self.ROW_LIMIT
+                items_obtained = 0
+                while True:
+                    url = build_cr_endpoint(self.RESOURCE, self.context)
+                    result = self.do_http_request(
+                        urls=url,
+                        params=request_params,
+                    ).get(url)
+
+                    if result is None:
+                        printer("Found nothing.")
+                        return
+
+                    if len(result["message"]["items"]) == 0:
+                        if items_obtained == 0:
+                            printer("Empty result.")
+                        else:
+                            printer(
+                                f"Found {items_obtained} item{'s' if items_obtained > 1 else ''}."
+                            )
+                        return
+                    else:
+                        items_obtained += len(result["message"]["items"])
+                        printer(
+                            f"Found {items_obtained} item{'s' if items_obtained > 1 else ''}. Fetching more..."
+                        )
+                    for item in result["message"]["items"]:
+                        yield item
+
+                    request_params["cursor"] = result["message"]["next-cursor"]
 
     def init_params(self) -> set[str]:
         """Get list of parameters for initialization."""
@@ -303,9 +312,7 @@ class Crossref(Endpoint):
 
         return self.from_self()
 
-    def get_dois(
-        self, dois: list[str]
-    ) -> tuple[DataFrame, list[str]]:
+    def get_dois(self, dois: list[str]) -> tuple[DataFrame, list[str]]:
         """
         Get all articles from a list of DOIs as dataframe.
         """

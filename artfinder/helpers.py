@@ -511,7 +511,26 @@ def pretty_print_xml(xml: LxmlElement) -> None:
 
 class LinePrinter:
     """
-    Class to handle printing on the same line.
+    A utility class for printing text on the same line in the terminal.
+
+    This class is useful for dynamically updating a single line of output,
+    such as progress indicators or status messages.
+
+    Usage:
+    ------
+    ```python
+    printer = LinePrinter()
+    printer("Processing...")
+    printer("Completed!")
+    printer.close()
+    ```
+
+    This will overwrite "Processing..." with "Completed!" on the same line.
+
+    Notes:
+    ------
+    - In Jupyter Notebook environments, it uses IPython's `DisplayHandle` to update the output.
+    - In terminal environments, it uses ANSI escape codes to overwrite the current line.
     """
 
     def __init__(self) -> None:
@@ -528,6 +547,14 @@ class LinePrinter:
     def close(self) -> None:
         if "ipykernel" not in sys.modules:
             print()
+
+    def __enter__(self) -> LinePrinter:
+        return self
+    
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
+        if exc_type is not None:
+            raise exc_value
 
 
 class MultiLinePrinter:

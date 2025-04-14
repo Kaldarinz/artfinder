@@ -46,6 +46,7 @@ class ArtFinder:
 
     def find_article(
         self,
+        *,
         doi: str | None = None,
         title: str | None = None,
         database: Literal["pubmed", "crossref", "all"] = "crossref",
@@ -57,15 +58,10 @@ class ArtFinder:
         if doi is None and title is None:
             raise ValueError("Either DOI or title must be provided.")
         if database in ["pubmed", "all"]:
-            raise NotImplementedError("only crossref is supported for now")
+            raise NotImplementedError("Only crossref support is implemented.")
 
         if title is not None:
-            return self.cr.query(
-                bibliographic=re.sub(r"\W+", "+", title.strip())
-            ).get_df()
+            # IDK, probably just self.cr.search(title) works as well
+            return self.cr.search(re.sub(r"\W+", "+", title.strip())).get_df()
         raise NotImplementedError("function not implemented yet")
-
-
-
-
 

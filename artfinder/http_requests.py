@@ -251,7 +251,7 @@ class AsyncHTTPRequest:
                 ):
                     await asyncio.sleep(delay)
                 if print_progress:
-                    printer(f"{(index + 1)}/{tot_urls}: {url}")
+                    printer(f"Fetching {(index + 1)}/{tot_urls}: {url}")
                 last_fetch_time = time()
                 return url, await fetch(session, url)
 
