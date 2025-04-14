@@ -5,16 +5,18 @@ from __future__ import annotations
 import datetime
 import json
 import re
+from ast import literal_eval
 
 from typing import Any, Dict, List, Optional, cast
 
 from lxml.etree import _Element
 from typeguard import typechecked
 import pandas as pd
+from pandas import DataFrame
 
-from .helpers import getAllContent, getContent, getContentUnique
+from artfinder.helpers import getAllContent, getContent, getContentUnique
 
-
+# TODO: There should probably be only one Article class
 @typechecked
 class Article:
     """Base class for all articles."""
@@ -401,3 +403,35 @@ class CrossrefArticle(Article):
         df = pd.DataFrame([self.to_dict()]).astype(col_types)
         df['publication_date'] = pd.to_datetime(df['publication_date'])
         return df
+
+def load_csv(path: str) -> DataFrame:
+    """
+    Load a CSV file into a DataFrame.
+    """
+
+    df = pd.read_csv(path)
+    df = _format_df(df)
+    return df
+
+def _format_df(df: DataFrame) -> DataFrame:
+    """
+    Format the DataFrame to have the correct columns and types."
+    """
+
+    cols = list(set(CrossrefArticle.get_all_slots() + PubMedArticle.get_all_slots()))
+    # Ensure all columns from cols are present in the DataFrame
+    for col in cols:
+        if col not in df.columns:
+            df[col] = pd.NA
+    # Convert to lower case
+    for col in ["title", "abstract", "authors", "journal", "publisher"]:
+        df[col] = df[col].str.lower()
+    # convert to python objects to python types
+    for col in ["license", "link", "authors", "references"]:
+        df[col] = (
+            df[col].fillna("None").str.replace("none", "None").transform(literal_eval)
+        )
+    # apply column types
+    df = df.astype(CrossrefArticle.col_types())
+    df["publication_date"] = pd.to_datetime(df["publication_date"], errors="coerce")
+    return df

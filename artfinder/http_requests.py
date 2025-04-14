@@ -7,7 +7,7 @@ email: a.popov.fizteh@gmail.com
 """
 
 import logging
-from time import sleep, time
+from time import time
 from typing import Any, Callable, Coroutine, TypeVar, ParamSpec, Iterator
 from threading import Thread
 from queue import Queue

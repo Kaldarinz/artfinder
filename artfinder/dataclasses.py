@@ -8,8 +8,8 @@ class CrossrefRateLimit(NamedTuple):
     A class to represent the Crossref rate limit.
     """
 
-    limit: str
-    interval: str
+    limit: int
+    interval: int
 
 class CrossrefResource(StrEnum):
     """

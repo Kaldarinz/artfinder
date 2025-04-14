@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import re
 import sys
+from ast import literal_eval
 
 try:
     from IPython.display import DisplayHandle, display
@@ -23,13 +24,13 @@ from typing import (
     Any,
 )
 from xml.etree.ElementTree import Element as EtreeElement
-
 import lxml.etree
 from lxml.etree import _Element as LxmlElement
 from typeguard import typechecked
 from typing_extensions import TypeAlias
 from pandas import DataFrame
 import pandas as pd
+
 
 
 Element: TypeAlias = Union[LxmlElement, EtreeElement]
@@ -585,3 +586,18 @@ class PrinterLine:
 
     def free(self) -> None:
         self.busy = False
+
+def strict_filter(title: str) -> bool:
+
+    # patterns
+    parts = [
+        r"(?=.*laser\w*)(?=.*\w*(gener|synth|prod|manufact|fabric)\w*)(?=.*(nano|colloid|quantum\sdot)\w*|.*\bnps\b)",
+        r"(?=.*(nano|particle|cluster)\w*)(?=.*\b\w*(ablat|fragment)\w*)",
+    ]
+    pattern = r"(" + r"|".join(parts) + r")"
+    # exclude patterns
+    exlude_parts = [
+        r"(?!.*nanostructur(ing|ed)\w*)",
+    ]
+    pattern += r"".join(exlude_parts)
+    return re.search(pattern, title, re.IGNORECASE) is not None
