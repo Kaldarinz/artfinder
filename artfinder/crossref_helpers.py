@@ -6,8 +6,11 @@ Author: Anton Popov
 email: a.popov.fizteh@gmail.com
 """
 
+import logging
+
 from artfinder.dataclasses import CrossrefResource
 
+logger = logging.getLogger(__name__)
 
 CROSSREF_API_BASE = 'api.crossref.org'
 
@@ -59,4 +62,6 @@ def build_cr_endpoint(
         parts.extend(endpoint)
 
     endpoint_path = "/".join(parts)
-    return f"https://{CROSSREF_API_BASE}/{endpoint_path}"
+    complete_url = f"https://{CROSSREF_API_BASE}/{endpoint_path}"
+
+    return complete_url

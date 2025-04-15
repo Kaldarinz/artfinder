@@ -22,20 +22,32 @@ class Article:
     """Base class for all articles."""
 
     __slots__ = (
-        "authors",
-        "abstract",
         "title",
+        "authors",
+        "journal",
+        "publication_date",
+        "link",
         "doi",
         "type",
-        "journal",
+        "keywords",
+        "is_referenced_by_count",
+        "abstract",
+        "publisher",
         "issn",
         "volume",
         "issue",
         "start_page",
         "end_page",
-        "publication_date",
         "references",
+        "pmid",
+        "pmcid",
+        "license",
     )
+
+    def __init__(self) -> None:
+        """Initialize all attributes in __slots__ to None."""
+        for slot in self.__slots__:
+            setattr(self, slot, None)
 
     def to_dict(self) -> Dict[Any, Any]:
         """Convert the parsed information to a Python dict."""
@@ -86,11 +98,6 @@ class Article:
 class PubMedArticle(Article):
     """Data class that contains a PubMed article."""
 
-    __slots__ = (
-        "pmid",
-        "pmcid",
-        "keywords",
-    )
 
     def __init__(self, xml_element: Optional[_Element] = None, **kwargs: Any) -> None:
         """Initialize of the object from XML or from parameters."""
@@ -247,13 +254,6 @@ class PubMedArticle(Article):
 @typechecked
 class CrossrefArticle(Article):
     """Data class that contains a Crossref article."""
-
-    __slots__ = (
-        "publisher",
-        "license",
-        "is_referenced_by_count",
-        "link",
-    )
 
     def __init__(self, data: dict[str, Any]) -> None:
         """

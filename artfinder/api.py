@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 P = ParamSpec("P")
 
+
 class ArtFinder:
     """
     Base class for ArtFinder API.
@@ -49,6 +50,7 @@ class ArtFinder:
         *,
         doi: str | None = None,
         title: str | None = None,
+        max_results: int = 1,
         database: Literal["pubmed", "crossref", "all"] = "crossref",
     ) -> DataFrame:
         """
@@ -62,6 +64,10 @@ class ArtFinder:
 
         if title is not None:
             # IDK, probably just self.cr.search(title) works as well
-            return self.cr.search(re.sub(r"\W+", "+", title.strip())).get_df()
+            """ return self.cr.search(
+                re.sub(r"\W+", "+", title.strip()), max_results
+            ).get_df() """
+            return self.cr.search(title, max_results).get_df()
+        if doi is not None:
+            return self.cr.doi(doi)
         raise NotImplementedError("function not implemented yet")
-

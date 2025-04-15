@@ -37,6 +37,7 @@ class Endpoint(ABC):
         self,
         context: list[str] | None = None,
         request_params: dict[str, Any] | None = None,
+        endpoint: str | None = None,
         email: str | None = None,
         **kwargs,
     ):
@@ -49,6 +50,7 @@ class Endpoint(ABC):
         self.get = ahttpr.get
         self.request_params = request_params or {}
         self.context = context
+        self.endpoint = endpoint
         self.email = email
         """
         Context for the request. e.g. context=['types', 'journal-article'] and
@@ -86,7 +88,8 @@ class Endpoint(ABC):
         This is used to build the url attribute.
         """
 
-        escape_pagging = ["offset", "rows"]
+        # it contained "rows"...
+        escape_pagging = ["offset"]
 
         for item in escape_pagging:
             self._request_params.pop(item, None)
@@ -96,11 +99,9 @@ class Endpoint(ABC):
         """
         This attribute retrieve the API version.
         """
-        result = (
-            self.get(
-                url=self.request_endpoint,
-                params=self.request_params,
-            )
+        result = self.get(
+            url=self.request_url,
+            params=self.request_params,
         )
 
         return result.get("message_version", "undefined")
@@ -129,15 +130,13 @@ class Endpoint(ABC):
         request_params["rows"] = 0
 
         result = self.get(
-                url=self.request_endpoint,
-                params=request_params,
-            )
-            
+            url=self.request_url,
+            params=request_params,
+        )
 
-        
         num_found = int(result.get("message", {}).get("total-results"))
-        self.status_line(f'Found {num_found} items.')
-    
+        self.status_line(f"Found {num_found} items.")
+
         return num_found
 
     @property
@@ -167,71 +166,72 @@ class Endpoint(ABC):
 
         sorted_request_params = sorted([(k, v) for k, v in self.request_params.items()])
         req = requests.Request(
-            "get", self.request_endpoint, params=sorted_request_params
+            "get", self.request_url, params=sorted_request_params
         ).prepare()
 
         return req.url
 
     @property
-    def request_endpoint(self) -> str:
+    def request_url(self) -> str:
         """Request endpoint for http request."""
-        return build_cr_endpoint(resource=self.RESOURCE, context=self.context)
+        return build_cr_endpoint(
+            resource=self.RESOURCE, endpoint=self.endpoint, context=self.context
+        )
 
     def __iter__(self) -> Generator[dict[str, str], None, None]:
 
-            if any(value in self.request_params for value in ["sample", "rows"]):
+        if any(value in self.request_params for value in ["sample", "rows"]):
+            if self.request_params.get('rows') is not None:
+                self.status_line(f"Fetching up to {self.request_params['rows']} items...")
+            result = self.get(
+                url=self.request_url,
+                params=self.request_params,
+            )
+            if result is None:
+                self.status_line("Found nothing.")
+                return
+            self.status_line(f"Fetched {len(result['message']['items'])} items.")
+            for item in result["message"]["items"]:
+                yield item
+
+        else:
+            request_params = dict(self.request_params)
+            request_params["cursor"] = "*"
+            request_params["rows"] = self.ROW_LIMIT
+            items_obtained = 0
+            self.status_line(f'Fetching {request_params["rows"]} items...')
+            while True:
                 result = self.get(
-                    url=self.request_endpoint,
-                    params=self.request_params,
+                    url=self.request_url,
+                    params=request_params,
                 )
 
                 if result is None:
-                    print("Found nothing.")
+                    self.status_line("Found nothing.")
                     return
 
+                if len(result["message"]["items"]) == 0:
+                    if items_obtained == 0:
+                        self.status_line("Empty result.")
+                    else:
+                        self.status_line(
+                            f"Found {items_obtained} item{'s' if items_obtained > 1 else ''}."
+                        )
+                    return
+                else:
+                    items_obtained += len(result["message"]["items"])
+                    self.status_line(
+                        f"Found {items_obtained} item{'s' if items_obtained > 1 else ''}. Fetching more..."
+                    )
                 for item in result["message"]["items"]:
                     yield item
-                return
 
-            else:
-                request_params = dict(self.request_params)
-                request_params["cursor"] = "*"
-                request_params["rows"] = self.ROW_LIMIT
-                items_obtained = 0
-                self.status_line('Fetching items...')
-                while True:
-                    url = build_cr_endpoint(self.RESOURCE, self.context)
-                    result = self.get(
-                        url=url,
-                        params=request_params,
-                    )
-
-                    if result is None:
-                        self.status_line("Found nothing.")
-                        return
-
-                    if len(result["message"]["items"]) == 0:
-                        if items_obtained == 0:
-                            self.status_line("Empty result.")
-                        else:
-                            self.status_line(
-                                f"Found {items_obtained} item{'s' if items_obtained > 1 else ''}."
-                            )
-                        return
-                    else:
-                        items_obtained += len(result["message"]["items"])
-                        self.status_line(
-                            f"Found {items_obtained} item{'s' if items_obtained > 1 else ''}. Fetching more..."
-                        )
-                    for item in result["message"]["items"]:
-                        yield item
-
-                    request_params["cursor"] = result["message"]["next-cursor"]
+                request_params["cursor"] = result["message"]["next-cursor"]
 
     def init_params(self) -> set[str]:
         """Get list of parameters for initialization."""
 
-        return set(("email", "request_params", "context"))
+        return set(("email", "request_params", "context", "endpoint"))
 
     def from_self(self, **kwargs) -> Self:
         """
@@ -291,11 +291,13 @@ class Crossref(Endpoint):
         self.request_params["query." + CrossrefQueryField.AUTHOR] = author
         return self.from_self()
 
-    def search(self, query: str) -> Self:
+    def search(self, query: str, max_results: int | None = None) -> Self:
         """
         Bibliographic search.
         """
         self.request_params["query." + CrossrefQueryField.BIBLIOGRAPHIC] = query
+        if max_results is not None:
+            self.request_params["rows"] = max_results
         return self.from_self()
 
     def filter(self, **kwargs) -> Self:
@@ -319,6 +321,22 @@ class Crossref(Endpoint):
                     self.request_params["filter"] += "," + field + ":" + str(v)
 
         return self.from_self()
+
+    def doi(self, doi: str) -> DataFrame:
+        """
+        Search by DOI.
+        """
+
+        self.status_line(f"Fetching {doi}...")
+        result = self.get(
+            url=build_cr_endpoint(resource=self.RESOURCE, endpoint=doi),
+        )
+        if result is None:
+            self.status_line("Found nothing.")
+            return DataFrame(columns=CrossrefArticle.get_all_slots())
+
+        self.status_line(f"Fethed {doi}")
+        return CrossrefArticle(result['message']).to_df()
 
     def get_dois(self, dois: list[str]) -> tuple[DataFrame, list[str]]:
         """

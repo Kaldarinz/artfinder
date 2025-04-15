@@ -85,17 +85,6 @@ class AsyncHTTPRequest:
 
         self.rate_limit = CrossrefRateLimit(rate_limit, interval_value)
 
-    async def periodic_print(self, period: float) -> None:
-        """
-        Periodically print the download status.
-        """
-        try:
-            while True:
-                self.printer.print()
-                await asyncio.sleep(period)
-        except asyncio.CancelledError:
-            self.printer.close()
-
     async def _get(
         self,
         urls: list[str],
@@ -273,6 +262,7 @@ class AsyncHTTPRequest:
         async with ClientSession() as session:
             tasks = [fetch_with_limit(session, url, i) for i, url in enumerate(urls)]
             results = await asyncio.gather(*tasks)
+            
         return {result[0]: result[1] for result in results}
 
     def async_get(
