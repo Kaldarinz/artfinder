@@ -62,6 +62,7 @@ class AsyncHTTPRequest:
         self.concurrency_timeout = concurrency_timeout
         self.etiquette = Etiquette(contact_email=email)
         self.max_retries = max_retries
+        # TODO: print progress in a single line only
         self.printer = printer or MultiLinePrinter(concurrency_limit + 1)
 
     def _update_rate_limits(self, headers: dict[str, str]):
@@ -239,9 +240,9 @@ class AsyncHTTPRequest:
             """
 
             nonlocal last_fetch_time
-            with self.printer.get_line() as printer_line:
-                # respect concurrent requests limit
-                async with concur_requests_limit:
+            # respect concurrent requests limit
+            async with concur_requests_limit:
+                with self.printer.get_line() as printer_line:
                     # wait for timeout if 429 error occured
                     await allowed_by_rate_limit.wait()
                     cur_time = time()

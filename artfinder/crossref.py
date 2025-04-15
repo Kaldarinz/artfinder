@@ -344,8 +344,10 @@ class Crossref(Endpoint):
         """
 
         # Get all articles from a list of DOIs
-        urls = build_cr_endpoint(CrossrefResource.WORKS, endpoint=dois)
-        raise NotImplementedError("This method is not implemented yet.")
+        urls = [
+            build_cr_endpoint(resource=self.RESOURCE, endpoint=doi) for doi in dois
+        ]
+        results = self.async_get(urls)
 
     def get_refs(
         self, df: DataFrame, concurrent_lim: int = 50

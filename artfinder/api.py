@@ -18,7 +18,7 @@ from typing import (
 )
 import re
 import pandas as pd
-from pandas import DataFrame
+from pandas import DataFrame, Series
 
 from artfinder.article import PubMedArticle, CrossrefArticle
 from artfinder.crossref import Crossref
@@ -50,11 +50,10 @@ class ArtFinder:
         *,
         doi: str | None = None,
         title: str | None = None,
-        max_results: int = 1,
         database: Literal["pubmed", "crossref", "all"] = "crossref",
-    ) -> DataFrame:
+    ) -> Series:
         """
-        Find an article by DOI or title.
+        Use this to get single article by title or doi.
         """
 
         if doi is None and title is None:
@@ -67,7 +66,30 @@ class ArtFinder:
             """ return self.cr.search(
                 re.sub(r"\W+", "+", title.strip()), max_results
             ).get_df() """
-            return self.cr.search(title, max_results).get_df()
-        if doi is not None:
-            return self.cr.doi(doi)
-        raise NotImplementedError("function not implemented yet")
+            df = self.cr.search(title, max_results=1).get_df()
+        else:
+            df = self.cr.doi(doi) # type: ignore
+        return pd.Series(df.iloc[0]) if not df.empty else pd.Series(index=df.columns)
+    
+    def get_refd(self, article: CrossrefArticle|Series|DataFrame) -> DataFrame:
+        """
+        Get cited articles for given articles.
+        
+        Parameters
+        ----------
+        article : CrossrefArticle|Series|DataFrame
+            Article(s) to get citing articles for.
+        """
+
+        if isinstance(article, CrossrefArticle):
+            doi = article.doi
+        elif isinstance(article, Series):
+            doi = article["doi"]
+        elif isinstance(article, DataFrame):
+            doi = article.iloc[0]["doi"]
+        else:
+            raise TypeError("article must be CrossrefArticle, Series or DataFrame")
+        
+        
+
+
