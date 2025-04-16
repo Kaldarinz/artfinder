@@ -54,7 +54,7 @@ class Article:
         dct = {key: self.__getattribute__(key) for key in self.get_all_slots()}
         for key, val in dct.items():
             if val is not None:
-                dct[key] = str(val).lower()
+                dct[key] = str(val)
         return dct
 
     @classmethod
@@ -91,7 +91,8 @@ class Article:
             "volume": "string",
             "issue": "string",
             "start_page": "string",
-            "end_page": "string"
+            "end_page": "string",
+            "is_referenced_by_count": "int",
         }
     
 @typechecked
@@ -400,8 +401,10 @@ class CrossrefArticle(Article):
             {
                 "publisher": "string",
             })
-        df = pd.DataFrame([self.to_dict()]).astype(col_types)
-        df['publication_date'] = pd.to_datetime(df['publication_date'])
+        df = pd.DataFrame([self.to_dict()])
+        df = _format_df(df)
+        """ df = pd.DataFrame([self.to_dict()]).astype(col_types)
+        df['publication_date'] = pd.to_datetime(df['publication_date']) """
         return df
 
 def load_csv(path: str) -> DataFrame:
