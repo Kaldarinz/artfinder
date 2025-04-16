@@ -8,7 +8,7 @@ email: a.popov.fizteh@gmail.com
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, date
 from typing import Any, Self, TypeVar, cast, Generator
 import logging
 
@@ -16,7 +16,12 @@ import requests
 import pandas as pd
 from pandas import DataFrame
 
-from artfinder.dataclasses import CrossrefResource, CrossrefQueryField, DocumentType
+from artfinder.dataclasses import (
+    CrossrefResource,
+    CrossrefQueryField,
+    CrossrefFilterField,
+    DocumentType,
+)
 from artfinder.http_requests import AsyncHTTPRequest
 from artfinder.crossref_helpers import build_cr_endpoint
 from artfinder.article import CrossrefArticle
@@ -181,8 +186,11 @@ class Endpoint(ABC):
     def __iter__(self) -> Generator[dict[str, str], None, None]:
 
         if any(value in self.request_params for value in ["sample", "rows"]):
-            if self.request_params.get('rows') is not None:
-                self.status_line(f"Fetching up to {self.request_params['rows']} items...")
+            if self.request_params.get("rows") is not None:
+                self.status_line(
+                    f"Fetching up to {self.request_params['rows']} items..."
+                )
+            logger.warning(f"{self.request_params=}")
             result = self.get(
                 url=self.request_url,
                 params=self.request_params,
@@ -256,11 +264,13 @@ class Crossref(Endpoint):
         """works endpoint."""
         return CrossrefResource.WORKS
 
-    def get_df(self) -> DataFrame:
+    def get_df(self, max_results: int | None = None) -> DataFrame:
         """
         Build data frame query results.
         """
 
+        if max_results is not None:
+            self.request_params["rows"] = max_results
         # Build list of CrossrefArticle objects
         all_articles = [CrossrefArticle(article) for article in self]
         # Create a DataFrame from the list of CrossrefArticle objects
@@ -291,13 +301,11 @@ class Crossref(Endpoint):
         self.request_params["query." + CrossrefQueryField.AUTHOR] = author
         return self.from_self()
 
-    def search(self, query: str, max_results: int | None = None) -> Self:
+    def search(self, query: str) -> Self:
         """
         Bibliographic search.
         """
         self.request_params["query." + CrossrefQueryField.BIBLIOGRAPHIC] = query
-        if max_results is not None:
-            self.request_params["rows"] = max_results
         return self.from_self()
 
     def filter(self, **kwargs) -> Self:
@@ -316,11 +324,23 @@ class Crossref(Endpoint):
 
             for i, v in enumerate(validated_values):
                 if i == 0 and "filter" not in self.request_params:
-                    self.request_params["filter"] = field + ":" + str(v)
+                    self.request_params["filter"] = (
+                        field.replace("_", "-") + ":" + str(v)
+                    )
                 else:
-                    self.request_params["filter"] += "," + field + ":" + str(v)
+                    self.request_params["filter"] += (
+                        "," + field.replace("_", "-") + ":" + str(v)
+                    )
 
         return self.from_self()
+
+    def article(self) -> Self:
+        """
+        Ensure that only articles will be searched.
+        """
+        return self.filter(
+            type=[DocumentType.JOURNAL_ARTICLE, DocumentType.PROCEEDINGS_ARTICLE]
+        )
 
     def doi(self, doi: str) -> DataFrame:
         """
@@ -336,7 +356,7 @@ class Crossref(Endpoint):
             return DataFrame(columns=CrossrefArticle.get_all_slots())
 
         self.status_line(f"Fethed {doi}")
-        return CrossrefArticle(result['message']).to_df()
+        return CrossrefArticle(result["message"]).to_df()
 
     def get_dois(self, dois: list[str]) -> tuple[DataFrame, list[str]]:
         """
@@ -344,9 +364,7 @@ class Crossref(Endpoint):
         """
 
         # Get all articles from a list of DOIs
-        urls = [
-            build_cr_endpoint(resource=self.RESOURCE, endpoint=doi) for doi in dois
-        ]
+        urls = [build_cr_endpoint(resource=self.RESOURCE, endpoint=doi) for doi in dois]
         results = self.async_get(urls)
 
     def get_refs(
@@ -378,52 +396,52 @@ class CrossrefFilterValidator:
         "archive": "archive",
         "article_number": "dummy",
         "assertion": "dummy",
-        "assertion-group": "dummy",
+        "assertion_group": "dummy",
         "award.funder": "dummy",
         "award.number": "dummy",
-        "category-name": "dummy",
-        "clinical-trial-number": "dummy",
-        "container-title": "dummy",
-        "content-domain": "dummy",
+        "category_name": "dummy",
+        "clinical_trial-number": "dummy",
+        "container_title": "dummy",
+        "content_domain": "dummy",
         "directory": "directory",
         "doi": "dummy",
-        "from-accepted-date": "is_date",
-        "from-created-date": "is_date",
-        "from-deposit-date": "is_date",
-        "from-event-end-date": "is_date",
-        "from-event-start-date": "is_date",
-        "from-index-date": "is_date",
-        "from-issued-date": "is_date",
-        "from-online-pub-date": "is_date",
-        "from-posted-date": "is_date",
-        "from-print-pub-date": "is_date",
-        "from-pub-date": "is_date",
-        "from-update-date": "is_date",
-        "full-text.application": "dummy",
-        "full-text.type": "dummy",
-        "full-text.version": "dummy",
+        "from_accepted_date": "is_date",
+        "from_created_date": "is_date",
+        "from_deposit_date": "is_date",
+        "from_event_end_date": "is_date",
+        "from_event_start_date": "is_date",
+        "from_index_date": "is_date",
+        "from_issued_date": "is_date",
+        "from_online_pub_date": "is_date",
+        "from_posted_date": "is_date",
+        "from_print_pub_date": "is_date",
+        "from_pub_date": "is_date",
+        "from_update_date": "is_date",
+        "full_text.application": "dummy",
+        "full_text.type": "dummy",
+        "full_text.version": "dummy",
         "funder": "dummy",
-        "funder-doi-asserted-by": "dummy",
-        "group-title": "dummy",
-        "has-abstract": "is_bool",
-        "has-affiliation": "is_bool",
-        "has-archive": "is_bool",
-        "has-assertion": "is_bool",
-        "has-authenticated-orcid": "is_bool",
-        "has-award": "is_bool",
-        "has-clinical-trial-number": "is_bool",
-        "has-content-domain": "is_bool",
-        "has-domain-restriction": "is_bool",
-        "has-event": "is_bool",
-        "has-full-text": "is_bool",
-        "has-funder": "is_bool",
-        "has-funder-doi": "is_bool",
-        "has-license": "is_bool",
-        "has-orcid": "is_bool",
-        "has-references": "is_bool",
-        "has-relation": "is_bool",
-        "has-update": "is_bool",
-        "has-update-policy": "is_bool",
+        "funder_doi_asserted_by": "dummy",
+        "group_title": "dummy",
+        "has_abstract": "is_bool",
+        "has_affiliation": "is_bool",
+        "has_archive": "is_bool",
+        "has_assertion": "is_bool",
+        "has_authenticated-orcid": "is_bool",
+        "has_award": "is_bool",
+        "has_clinical_trial_number": "is_bool",
+        "has_content_domain": "is_bool",
+        "has_domain_restriction": "is_bool",
+        "has_event": "is_bool",
+        "has_full_text": "is_bool",
+        "has_funder": "is_bool",
+        "has_funder_doi": "is_bool",
+        "has_license": "is_bool",
+        "has_orcid": "is_bool",
+        "has_references": "is_bool",
+        "has_relation": "is_bool",
+        "has_update": "is_bool",
+        "has_update_policy": "is_bool",
         "is-update": "is_bool",
         "isbn": "dummy",
         "issn": "dummy",
@@ -438,27 +456,29 @@ class CrossrefFilterValidator:
         "relation.object-type": "dummy",
         "relation.type": "dummy",
         "type": "correct_doc_type",
-        "type-name": "dummy",
-        "until-accepted-date": "is_date",
-        "until-created-date": "is_date",
-        "until-deposit-date": "is_date",
-        "until-event-end-date": "is_date",
-        "until-event-start-date": "is_date",
-        "until-index-date": "is_date",
-        "until-issued-date": "is_date",
-        "until-online-pub-date": "is_date",
-        "until-posted-date": "is_date",
-        "until-print-pub-date": "is_date",
-        "until-pub-date": "is_date",
-        "until-update-date": "is_date",
-        "update-type": "dummy",
+        "type_name": "dummy",
+        "until_accepted_date": "is_date",
+        "until_created_date": "is_date",
+        "until_deposit_date": "is_date",
+        "until_event_end_date": "is_date",
+        "until_event_start_date": "is_date",
+        "until_index_date": "is_date",
+        "until_issued_date": "is_date",
+        "until_online_pub_date": "is_date",
+        "until_posted_date": "is_date",
+        "until_print_pub_date": "is_date",
+        "until_pub_date": "is_date",
+        "until_update_date": "is_date",
+        "update_type": "dummy",
         "updates": "dummy",
     }
 
     def __call__(self, filter: str, value: str) -> Any:
-        if value not in self.VALIDATORS:
+        # TODO: add some kind of similarity check, so that only the most
+        # similar values are returned in error description
+        if filter not in self.VALIDATORS:
             raise ValueError(
-                f"Invalid filter {filter}. Valid filters: {self.VALIDATORS.keys()}"
+                f"Invalid filter: {filter}. Valid filters: {self.VALIDATORS.keys()}"
             )
         try:
             return getattr(self, self.VALIDATORS[filter])(value)
@@ -472,18 +492,18 @@ class CrossrefFilterValidator:
         return value
 
     @staticmethod
-    def is_date(value: str) -> datetime:
+    def is_date(value: str) -> date:
         """
         Validate date format.
         """
         try:
-            return datetime.strptime(value, "%Y")
+            return datetime.strptime(value, "%Y").date()
         except ValueError:
             try:
-                return datetime.strptime(value, "%Y-%m")
+                return datetime.strptime(value, "%Y-%m").date()
             except ValueError:
                 try:
-                    return datetime.strptime(value, "%Y-%m-%d")
+                    return datetime.strptime(value, "%Y-%m-%d").date()
                 except ValueError as exc:
                     raise ValueError(f"Invalid date {value}.")
 

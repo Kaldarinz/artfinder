@@ -17,11 +17,14 @@ from typing import (
     Self,
 )
 import re
+from datetime import datetime
+
 import pandas as pd
 from pandas import DataFrame, Series
 
 from artfinder.article import PubMedArticle, CrossrefArticle
 from artfinder.crossref import Crossref
+from artfinder.dataclasses import CrossrefFilterField, DocumentType
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 logger = logging.getLogger(__name__)
@@ -43,6 +46,7 @@ class ArtFinder:
         -------
         None
         """
+        self.email = email
         self.cr = Crossref(email=email)
 
     def find_article(
@@ -62,19 +66,127 @@ class ArtFinder:
             raise NotImplementedError("Only crossref support is implemented.")
 
         if title is not None:
-            # IDK, probably just self.cr.search(title) works as well
-            """ return self.cr.search(
-                re.sub(r"\W+", "+", title.strip()), max_results
-            ).get_df() """
-            df = self.cr.search(title, max_results=1).get_df()
+            df = (
+                self.cr.search(title).article().get_df(max_results=1)
+            )
         else:
-            df = self.cr.doi(doi) # type: ignore
+            df = self.cr.doi(doi)  # type: ignore
         return pd.Series(df.iloc[0]) if not df.empty else pd.Series(index=df.columns)
+
+    def search(
+        self,
+        query: str | None = None,
+        author: str | None = None,
+        pub_since: str | datetime | None = None,
+        pub_until: str | datetime | None = None,
+        database: Literal["pubmed", "crossref", "all"] = "crossref",
+        max_results: int|None = 100,
+    ) -> DataFrame:
+        """
+        Search for articles.
+
+        Parameters
+        ----------
+        query : str | None
+            Search query. Can be a title or other search term.
+            Can also be None if some other field is provided.
+        author : str | None
+            Author name to search for. Query field can also contain author name,
+            but this is a strict filter for author name.
+        pub_since : str | datetime | None
+            Publication date since which to search for articles.
+            Can be a string in YYYY, YYYY-MM, YYYY-MM-DD format or a datetime object.
+        pub_until : str | datetime | None
+            Publication date until which to search for articles.
+            Can be a string in YYYY, YYYY-MM, YYYY-MM-DD format or a datetime object.
+        database : Literal["pubmed", "crossref", "all"]
+            Database to search in. Can be "pubmed", "crossref" or "all".
+        max_results : int | None
+            Maximum number of results to return. If None, all results are returned.
+            It is better to check the number of results first using isearch() method
+
+        Returns
+        -------
+        DataFrame
+            DataFrame containing the search results.
+            Each row corresponds to a single article.
+        """
+
+        if database != "crossref":
+            raise NotImplementedError("Only crossref support is implemented.")
+        if not any([query, author, pub_since, pub_until]):
+            raise ValueError(
+                "At least one of query, author, pub_since or pub_until must be provided."
+            )
+        search = Crossref(email=self.email)
+        if query is not None:
+            search = search.search(query)
+        if author is not None:
+            search = search.author(author)
+        if pub_since is not None:
+            search = search.filter(from_pub_date=pub_since)
+        if pub_until is not None:
+            search = search.filter(until_pub_date=pub_until)
+        return search.article().get_df(max_results=max_results)
     
-    def get_refd(self, article: CrossrefArticle|Series|DataFrame) -> DataFrame:
+    def isearch(
+        self,
+        query: str | None = None,
+        author: str | None = None,
+        pub_since: str | datetime | None = None,
+        pub_until: str | datetime | None = None,
+        database: Literal["pubmed", "crossref", "all"] = "crossref",
+    ) -> int:
+        """
+        Get number of articles, which comply search.
+
+        Parameters
+        ----------
+        query : str | None
+            Search query. Can be a title or other search term.
+            Can also be None if some other field is provided.
+        author : str | None
+            Author name to search for. Query field can also contain author name,
+            but this is a strict filter for author name.
+        pub_since : str | datetime | None
+            Publication date since which to search for articles.
+            Can be a string in YYYY, YYYY-MM, YYYY-MM-DD format or a datetime object.
+        pub_until : str | datetime | None
+            Publication date until which to search for articles.
+            Can be a string in YYYY, YYYY-MM, YYYY-MM-DD format or a datetime object.
+        database : Literal["pubmed", "crossref", "all"]
+            Database to search in. Can be "pubmed", "crossref" or "all".
+        max_results : int | None
+            Maximum number of results to return. If None, all results are returned.
+            It is better to check the number of results first using isearch() method
+
+        Returns
+        -------
+        int
+            Number of articles, which comply search term.
+        """
+
+        if database != "crossref":
+            raise NotImplementedError("Only crossref support is implemented.")
+        if not any([query, author, pub_since, pub_until]):
+            raise ValueError(
+                "At least one of query, author, pub_since or pub_until must be provided."
+            )
+        search = Crossref(email=self.email)
+        if query is not None:
+            search = search.search(query)
+        if author is not None:
+            search = search.author(author)
+        if pub_since is not None:
+            search = search.filter(from_pub_date=pub_since)
+        if pub_until is not None:
+            search = search.filter(until_pub_date=pub_until)
+        return search.article().count()
+
+    def get_refd(self, article: CrossrefArticle | Series | DataFrame) -> DataFrame:
         """
         Get cited articles for given articles.
-        
+
         Parameters
         ----------
         article : CrossrefArticle|Series|DataFrame
@@ -89,7 +201,3 @@ class ArtFinder:
             doi = article.iloc[0]["doi"]
         else:
             raise TypeError("article must be CrossrefArticle, Series or DataFrame")
-        
-        
-
-

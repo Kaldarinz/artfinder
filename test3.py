@@ -6,14 +6,6 @@ logging.basicConfig(level=logging.DEBUG)
 from artfinder.article import load_csv
 
 cr = artfinder.Crossref()
-af = artfinder.ArtFinder("aapopov1@mephi.ru")
-df = load_csv('database/processed/kabashin_full.csv')
+af = artfinder.ArtFinder()
 
-refs = []
-for dois in df.loc[:3,'references']:
-    if dois:
-        refs.extend(dois)
-refs = list(set(refs))
-len(refs)
-
-cr.get_dois(refs)
+af.search('laser synthesis of colloids', pub_since='2010')
