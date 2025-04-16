@@ -183,7 +183,7 @@ class ArtFinder:
             search = search.filter(until_pub_date=pub_until)
         return search.article().count()
 
-    def get_refd(self, article: CrossrefArticle | Series | DataFrame) -> DataFrame:
+    def get_refs(self, articles: CrossrefArticle | Series | DataFrame) -> DataFrame:
         """
         Get cited articles for given articles.
 
@@ -193,11 +193,21 @@ class ArtFinder:
             Article(s) to get citing articles for.
         """
 
-        if isinstance(article, CrossrefArticle):
-            doi = article.doi
-        elif isinstance(article, Series):
-            doi = article["doi"]
-        elif isinstance(article, DataFrame):
-            doi = article.iloc[0]["doi"]
+        refs = []
+        if isinstance(articles, CrossrefArticle):
+            if (new:=articles.references) is not None:
+                refs.extend(new)
+        elif isinstance(articles, Series):
+            if (new:=articles["references"]) is not None:
+                refs.extend(new)
+        elif isinstance(articles, DataFrame):
+            for _, article in articles.iterrows():
+                if (new:=article["references"]) is not None: # type: ignore
+                    refs.extend(new)
         else:
             raise TypeError("article must be CrossrefArticle, Series or DataFrame")
+        
+        refs = list(set(refs))
+        return Crossref(email=self.email).get_dois(refs)
+
+        
