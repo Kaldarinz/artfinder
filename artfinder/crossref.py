@@ -207,7 +207,7 @@ class Endpoint(ABC):
             request_params["cursor"] = "*"
             request_params["rows"] = self.ROW_LIMIT
             items_obtained = 0
-            self.status_line(f'Fetching {request_params["rows"]} items...')
+            self.status_line(f'Fetching up to {request_params["rows"]} items...')
             while True:
                 result = self.get(
                     url=self.request_url,
@@ -365,7 +365,7 @@ class Crossref(Endpoint):
 
         # Get all articles from a list of DOIs
         urls = [build_cr_endpoint(resource=self.RESOURCE, endpoint=doi) for doi in dois]
-        results = self.async_get(urls)
+        return self.async_get(urls)
 
     def get_refs(
         self, df: DataFrame, concurrent_lim: int = 50
