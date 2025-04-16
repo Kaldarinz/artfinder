@@ -167,7 +167,6 @@ class AsyncHTTPRequest:
                         url,
                         params=params,
                         headers=self.etiquette.header(),
-                        timeout=ClientTimeout(total=timeout),
                     ) as response:
                         if response.status == 200:
                             self._update_rate_limits(dict(response.headers))
@@ -260,7 +259,7 @@ class AsyncHTTPRequest:
                     last_fetch_time = time()
                     return url, await fetch(session, url, printer_line)
 
-        async with ClientSession() as session:
+        async with ClientSession(timeout=ClientTimeout(total=timeout)) as session:
             tasks = [fetch_with_limit(session, url, i) for i, url in enumerate(urls)]
             results = await asyncio.gather(*tasks)
             
