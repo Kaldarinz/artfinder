@@ -39,7 +39,6 @@ class AsyncHTTPRequest:
         concurrency_limit: int = 5,
         concurrency_timeout: int = 15,
         max_retries: int = 5,
-        printer: MultiLinePrinter | None = None,
     ) -> None:
         """
         Initialize the AsyncHTTPRequest class.
@@ -62,8 +61,7 @@ class AsyncHTTPRequest:
         self.concurrency_timeout = concurrency_timeout
         self.etiquette = Etiquette(contact_email=email)
         self.max_retries = max_retries
-        # TODO: print progress in a single line only
-        self.printer = printer or MultiLinePrinter(concurrency_limit + 1)
+
 
     def _update_rate_limits(self, headers: dict[str, str]):
 
@@ -133,9 +131,11 @@ class AsyncHTTPRequest:
 
         # Track the time of the last request
         last_fetch_time = time()
+        if print_progress:
+            printer = LinePrinter()
 
         async def fetch(
-            session: ClientSession, url: str, printer_line: PrinterLine
+            session: ClientSession, url: str,
         ) -> dict | None:
             """
             Fetch a single article.
@@ -156,7 +156,6 @@ class AsyncHTTPRequest:
 
             left_retries = self.max_retries
             nonlocal rate_limit_extra_timeout, rate_limited_start_time
-            # with printer_line as printer_line:
             try:
                 while left_retries:
                     if only_headers:
@@ -173,7 +172,6 @@ class AsyncHTTPRequest:
                             if only_headers:
                                 return dict(response.headers)
                             result = await response.json()
-                            printer_line(f"Fetched {url}")
                             return result
                         # if the response is 429, wait for the rate limit and retry
                         elif response.status == 429:
@@ -204,13 +202,12 @@ class AsyncHTTPRequest:
                                     rate_limit_extra_timeout = additional_timeout
                         # retry for internal server errors
                         elif 500 <= response.status < 600:
-                            printer_line(f"Server error {response.status} for {url}")
+                            logger.error(f"Server error {response.status} for {url}")
                         # return None for all other errors
                         else:
                             logger.error(f"Error fetching {url}: {response.status}")
                             return
                     left_retries -= 1
-                    printer_line(f"Retrying {url}, {left_retries} retries left")
                 logger.error(f"Max retries exceeded for {url}")
                 return
             except Exception as e:
@@ -241,29 +238,32 @@ class AsyncHTTPRequest:
             nonlocal last_fetch_time
             # respect concurrent requests limit
             async with concur_requests_limit:
-                with self.printer.get_line() as printer_line:
-                    # wait for timeout if 429 error occured
-                    await allowed_by_rate_limit.wait()
-                    cur_time = time()
-                    # wait until the next request can be made
-                    if (
-                        (delay :=
-                            self.rate_limit.interval / self.rate_limit.limit
-                            - (cur_time - last_fetch_time)
-                        )
-                        > 0
-                    ):
-                        await asyncio.sleep(delay)
-                    if print_progress:
-                        printer_line(f"Fetching {(index + 1)}/{tot_urls}: {url}")
-                    last_fetch_time = time()
-                    return url, await fetch(session, url, printer_line)
+                # wait for timeout if 429 error occured
+                await allowed_by_rate_limit.wait()
+                cur_time = time()
+                # wait until the next request can be made
+                if (
+                    (delay :=
+                        self.rate_limit.interval / self.rate_limit.limit
+                        - (cur_time - last_fetch_time)
+                    )
+                    > 0
+                ):
+                    await asyncio.sleep(delay)
+                if print_progress:
+                    printer(f"Fetching {(index + 1)}/{tot_urls}: {url}")
+                last_fetch_time = time()
+                return url, await fetch(session, url)
 
         async with ClientSession(timeout=ClientTimeout(total=timeout)) as session:
             tasks = [fetch_with_limit(session, url, i) for i, url in enumerate(urls)]
-            results = await asyncio.gather(*tasks)
+            gatered = await asyncio.gather(*tasks)
             
-        return {result[0]: result[1] for result in results}
+        results = {result[0]: result[1] for result in gatered}
+        if print_progress:
+            printer("Fetching completed.")
+            printer.close()
+        return results
 
     def async_get(
         self,

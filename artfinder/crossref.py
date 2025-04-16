@@ -47,10 +47,9 @@ class Endpoint(ABC):
         **kwargs,
     ):
         self.printer = MultiLinePrinter(self.CONCURRENCY_LIMIT + 1)
-        self.status_line = self.printer.get_line()
+        self.status_line = LinePrinter()
         ahttpr = AsyncHTTPRequest(
-            email=email, concurrency_limit=self.CONCURRENCY_LIMIT, printer=self.printer
-        )
+            email=email, concurrency_limit=self.CONCURRENCY_LIMIT)
         self.async_get = ahttpr.async_get
         self.get = ahttpr.get
         self.request_params = request_params or {}
