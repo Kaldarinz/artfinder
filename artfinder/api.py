@@ -47,7 +47,6 @@ class ArtFinder:
         None
         """
         self.email = email
-        self.cr = Crossref(email=email)
 
     def find_article(
         self,
@@ -58,6 +57,22 @@ class ArtFinder:
     ) -> Series:
         """
         Use this to get single article by title or doi.
+
+        Doi will return exactly requested article, while title will return the first
+        mathing article (title will *always* return some result).
+
+        Parameters
+        ----------
+        doi : str | None
+            DOI of the article to find.
+        title : str | None
+            Title of the article to find.
+        database : Literal["pubmed", "crossref", "all"]
+            Database to search in.
+
+        Returns
+        -------
+        Series containing the article information.
         """
 
         if doi is None and title is None:
@@ -66,11 +81,9 @@ class ArtFinder:
             raise NotImplementedError("Only crossref support is implemented.")
 
         if title is not None:
-            df = (
-                self.cr.search(title).article().get_df(max_results=1)
-            )
+            df = Crossref(email=self.email).search(title).article().get_df(max_results=1)
         else:
-            df = self.cr.doi(doi)  # type: ignore
+            df = Crossref(email=self.email).doi(doi)  # type: ignore
         return pd.Series(df.iloc[0]) if not df.empty else pd.Series(index=df.columns)
 
     def search(
@@ -80,7 +93,7 @@ class ArtFinder:
         pub_since: str | datetime | None = None,
         pub_until: str | datetime | None = None,
         database: Literal["pubmed", "crossref", "all"] = "crossref",
-        max_results: int|None = 100,
+        max_results: int | None = 100,
     ) -> DataFrame:
         """
         Search for articles.
@@ -107,9 +120,7 @@ class ArtFinder:
 
         Returns
         -------
-        DataFrame
-            DataFrame containing the search results.
-            Each row corresponds to a single article.
+        DataFrame containing the search results.
         """
 
         if database != "crossref":
@@ -118,17 +129,16 @@ class ArtFinder:
             raise ValueError(
                 "At least one of query, author, pub_since or pub_until must be provided."
             )
-        search = Crossref(email=self.email)
-        if query is not None:
-            search = search.search(query)
-        if author is not None:
-            search = search.author(author)
-        if pub_since is not None:
-            search = search.filter(from_pub_date=pub_since)
-        if pub_until is not None:
-            search = search.filter(until_pub_date=pub_until)
-        return search.article().get_df(max_results=max_results)
-    
+        return (
+            Crossref(email=self.email)
+            .search(query)
+            .author(author)
+            .filter(from_pub_date=pub_since)
+            .filter(until_pub_date=pub_until)
+            .article()
+            .get_df(max_results=max_results)
+        )
+
     def isearch(
         self,
         query: str | None = None,
@@ -162,8 +172,7 @@ class ArtFinder:
 
         Returns
         -------
-        int
-            Number of articles, which comply search term.
+        Number of articles, which comply search term.
         """
 
         if database != "crossref":
@@ -172,16 +181,15 @@ class ArtFinder:
             raise ValueError(
                 "At least one of query, author, pub_since or pub_until must be provided."
             )
-        search = Crossref(email=self.email)
-        if query is not None:
-            search = search.search(query)
-        if author is not None:
-            search = search.author(author)
-        if pub_since is not None:
-            search = search.filter(from_pub_date=pub_since)
-        if pub_until is not None:
-            search = search.filter(until_pub_date=pub_until)
-        return search.article().count()
+        return (
+            Crossref(email=self.email)
+            .search(query)
+            .author(author)
+            .filter(from_pub_date=pub_since)
+            .filter(until_pub_date=pub_until)
+            .article()
+            .count()
+        )
 
     def get_refs(self, articles: CrossrefArticle | Series | DataFrame) -> DataFrame:
         """
@@ -191,23 +199,27 @@ class ArtFinder:
         ----------
         article : CrossrefArticle|Series|DataFrame
             Article(s) to get citing articles for.
+            Series and DataFrame must contain a column with named "references".
+
+        Returns
+        -------
+        DataFrame containing the cited articles.
         """
 
         dois = []
+        # Create list of dois for referenced articles
         if isinstance(articles, CrossrefArticle):
-            if (new:=articles.references) is not None:
-                dois.extend(new)
+            if (more := articles.references) is not None:
+                dois.extend(more)
         elif isinstance(articles, Series):
-            if (new:=articles["references"]) is not None:
-                dois.extend(new)
+            if (more := articles["references"]) is not None:
+                dois.extend(more)
         elif isinstance(articles, DataFrame):
             for _, article in articles.iterrows():
-                if (new:=article["references"]) is not None: # type: ignore
-                    dois.extend(new)
+                if (more := article["references"]) is not None:  # type: ignore
+                    dois.extend(more)
         else:
             raise TypeError("article must be CrossrefArticle, Series or DataFrame")
-        
+
         dois = list(set(dois))
         return Crossref(email=self.email).get_dois(dois)
-
-        

@@ -48,8 +48,7 @@ class Endpoint(ABC):
     ):
         self.printer = MultiLinePrinter(self.CONCURRENCY_LIMIT + 1)
         self.status_line = LinePrinter()
-        ahttpr = AsyncHTTPRequest(
-            email=email, concurrency_limit=self.CONCURRENCY_LIMIT)
+        ahttpr = AsyncHTTPRequest(email=email, concurrency_limit=self.CONCURRENCY_LIMIT)
         self.async_get = ahttpr.async_get
         self.get = ahttpr.get
         self.request_params = request_params or {}
@@ -114,21 +113,9 @@ class Endpoint(ABC):
         """
         This method retrieve the total of records resulting from a given query.
 
-        This attribute can be used compounded with query, filter,
-        sort, order and facet methods.
-
-        Examples:
-            >>> from crossref.restful import Works
-            >>> Works().query('zika').count()
-            3597
-            >>> Works().query('zika').filter(prefix='10.1590').count()
-            61
-            >>> Works().query('zika').filter(prefix='10.1590').sort('published') \
-                .order('desc').filter(has_abstract='true').count()
-            14
-            >>> Works().query('zika').filter(prefix='10.1590').sort('published') \
-                .order('desc').filter(has_abstract='true').query(author='Marli').count()
-            1
+        Note
+        ----
+        This method will send request to the Crossref API and should be chained the last.
         """
         request_params = dict(self.request_params)
         request_params["rows"] = 0
@@ -285,30 +272,34 @@ class Crossref(Endpoint):
 
         return self.from_self()
 
-    def author(self, author: str) -> Self:
+    def author(self, author: str | None) -> Self:
         """
         Search by author.
         """
 
-        self.request_params["query." + CrossrefQueryField.AUTHOR] = author
+        if author is not None and author != "":
+            self.request_params["query." + CrossrefQueryField.AUTHOR] = author
         return self.from_self()
 
-    def search(self, query: str) -> Self:
+    def search(self, query: str | None) -> Self:
         """
         Bibliographic search.
         """
-        self.request_params["query." + CrossrefQueryField.BIBLIOGRAPHIC] = query
+
+        if query is not None and query != "":
+            self.request_params["query." + CrossrefQueryField.BIBLIOGRAPHIC] = query
         return self.from_self()
 
     def filter(self, **kwargs) -> Self:
         """
-        This method can be chained with query.
-
-        Valid filter fields are in CrossrefFilterField enum.
+        Filter the results at server side.
         """
 
         filter_validator = CrossrefFilterValidator()
         for field, value in kwargs.items():
+            # skip empty values
+            if value is None or value == "":
+                continue
             if isinstance(value, list):
                 validated_values = [filter_validator(field, v) for v in value]
             else:
@@ -360,10 +351,11 @@ class Crossref(Endpoint):
         results = self.async_get(urls)
         return ArticleCollection(
             [
-                CrossrefArticle(result["message"]) for result in results.values() if result is not None
+                CrossrefArticle(result["message"])
+                for result in results.values()
+                if result is not None
             ]
         ).to_df()
-        
 
     def get_refs(
         self, df: DataFrame, concurrent_lim: int = 50
