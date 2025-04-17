@@ -24,7 +24,7 @@ from artfinder.dataclasses import (
 )
 from artfinder.http_requests import AsyncHTTPRequest
 from artfinder.crossref_helpers import build_cr_endpoint
-from artfinder.article import CrossrefArticle
+from artfinder.article import CrossrefArticle, ArticleCollection
 from artfinder.helpers import LinePrinter, MultiLinePrinter
 
 logger = logging.getLogger(__name__)
@@ -270,14 +270,7 @@ class Crossref(Endpoint):
 
         if max_results is not None:
             self.request_params["rows"] = max_results
-        # Build list of CrossrefArticle objects
-        all_articles = [CrossrefArticle(article) for article in self]
-        # Create a DataFrame from the list of CrossrefArticle objects
-        df = pd.concat([article.to_df() for article in all_articles], ignore_index=True)
-        # If the DataFrame is empty, create an empty DataFrame with the correct columns
-        if df.size == 0:
-            df = DataFrame(columns=CrossrefArticle.get_all_slots())
-        return df
+        return ArticleCollection(self).to_df()
 
     def query(self, **kwargs) -> Self:
         """
@@ -357,14 +350,20 @@ class Crossref(Endpoint):
         self.status_line(f"Fethed {doi}")
         return CrossrefArticle(result["message"]).to_df()
 
-    def get_dois(self, dois: list[str]) -> tuple[DataFrame, list[str]]:
+    def get_dois(self, dois: list[str]) -> DataFrame:
         """
         Get all articles from a list of DOIs as dataframe.
         """
 
         # Get all articles from a list of DOIs
         urls = [build_cr_endpoint(resource=self.RESOURCE, endpoint=doi) for doi in dois]
-        return self.async_get(urls)
+        results = self.async_get(urls)
+        return ArticleCollection(
+            [
+                CrossrefArticle(result["message"]) for result in results.values() if result is not None
+            ]
+        ).to_df()
+        
 
     def get_refs(
         self, df: DataFrame, concurrent_lim: int = 50

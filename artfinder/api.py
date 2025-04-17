@@ -193,21 +193,21 @@ class ArtFinder:
             Article(s) to get citing articles for.
         """
 
-        refs = []
+        dois = []
         if isinstance(articles, CrossrefArticle):
             if (new:=articles.references) is not None:
-                refs.extend(new)
+                dois.extend(new)
         elif isinstance(articles, Series):
             if (new:=articles["references"]) is not None:
-                refs.extend(new)
+                dois.extend(new)
         elif isinstance(articles, DataFrame):
             for _, article in articles.iterrows():
                 if (new:=article["references"]) is not None: # type: ignore
-                    refs.extend(new)
+                    dois.extend(new)
         else:
             raise TypeError("article must be CrossrefArticle, Series or DataFrame")
         
-        refs = list(set(refs))
-        return Crossref(email=self.email).get_dois(refs)
+        dois = list(set(dois))
+        return Crossref(email=self.email).get_dois(dois)
 
         

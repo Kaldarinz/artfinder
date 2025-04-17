@@ -7,7 +7,7 @@ import json
 import re
 from ast import literal_eval
 
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, cast, Iterable
 
 from lxml.etree import _Element
 from typeguard import typechecked
@@ -15,6 +15,7 @@ import pandas as pd
 from pandas import DataFrame
 
 from artfinder.helpers import getAllContent, getContent, getContentUnique
+
 
 # TODO: There should probably be only one Article class
 @typechecked
@@ -77,7 +78,7 @@ class Article:
             if hasattr(base, "__slots__"):
                 slots.extend(base.__slots__)
         return slots
-    
+
     @staticmethod
     def col_types() -> dict[str, str]:
         """Return dictionary with column names and their types."""
@@ -94,11 +95,11 @@ class Article:
             "end_page": "string",
             "is_referenced_by_count": "int",
         }
-    
+
+
 @typechecked
 class PubMedArticle(Article):
     """Data class that contains a PubMed article."""
-
 
     def __init__(self, xml_element: Optional[_Element] = None, **kwargs: Any) -> None:
         """Initialize of the object from XML or from parameters."""
@@ -141,7 +142,9 @@ class PubMedArticle(Article):
         if self.type == "Journal Article":
             self.type = "article-journal"
         self.authors = self._extractAuthors(element=xml_element, base_path=base)
-        self.publication_date = self._extractPublicationDate(element=xml_element, base=base)
+        self.publication_date = self._extractPublicationDate(
+            element=xml_element, base=base
+        )
 
         # Pubmed data
         base = "PubmedData/"
@@ -159,7 +162,9 @@ class PubMedArticle(Article):
         self.keywords = self._extractKeywords(xml_element)
         self.references = self._extractReferences(xml_element)
 
-    def _extractAuthors(self, element:_Element, base_path: str) -> List[dict[str, Optional[str]]]:
+    def _extractAuthors(
+        self, element: _Element, base_path: str
+    ) -> List[dict[str, Optional[str]]]:
         base_path += "AuthorList/"
         return [
             {
@@ -180,7 +185,9 @@ class PubMedArticle(Article):
         ]
         return result if result else None
 
-    def _extractPublicationDate(self, element: _Element, base: str) -> Optional[datetime.date]:
+    def _extractPublicationDate(
+        self, element: _Element, base: str
+    ) -> Optional[datetime.date]:
         publication_date = element.find(base + "ArticleDate")
         # First try to get the publication date from the ArticleDate tag
         if publication_date is not None:
@@ -252,6 +259,7 @@ class PubMedArticle(Article):
             indent=4,
         )
 
+
 @typechecked
 class CrossrefArticle(Article):
     """Data class that contains a Crossref article."""
@@ -293,14 +301,14 @@ class CrossrefArticle(Article):
 
     def _extract_journal(self, data: dict[str, Any]) -> str | None:
         """Extract the journal from the data."""
-        journal = data.get("container-title", [''])
+        journal = data.get("container-title", [""])
         if len(journal) == 0 or journal[0] == "":
             return None
         return journal[0].strip()
 
-    def _extract_title(self, data: dict[str, Any]) -> str|None:
+    def _extract_title(self, data: dict[str, Any]) -> str | None:
         """Extract the title from the data."""
-        title = data.get("title", [''])
+        title = data.get("title", [""])
         if len(title) == 0 or title[0] == "":
             return None
         # some titles contain garbage like '&lt;title&gt;' and '&lt;/title&gt;'
@@ -315,7 +323,7 @@ class CrossrefArticle(Article):
         for i in range(len(authors_list)):
             author = authors_list[i]
             author_new = {}
-            if author.get('family'):
+            if author.get("family"):
                 author_new["lastname"] = author.get("family")
             else:
                 author_new["lastname"] = author.get("lastname")
@@ -357,7 +365,11 @@ class CrossrefArticle(Article):
     def _extract_references(self, data: dict[str, Any]) -> List[str] | None:
         """Extract the references from the data."""
         references = data.get("reference", None)
-        ref_list = [reference.get("DOI") for reference in references if reference.get("DOI")] if references else []
+        ref_list = (
+            [reference.get("DOI") for reference in references if reference.get("DOI")]
+            if references
+            else []
+        )
         return ref_list if len(ref_list) else None
 
     def _extrac_date(self, data: dict[str, Any]) -> datetime.date | None:
@@ -377,14 +389,14 @@ class CrossrefArticle(Article):
 
     def _extract_abstract(self, data: dict[str, Any]) -> str | None:
         """Extract the abstract from the data."""
-        
+
         raw_abstract = data.get("abstract")
         if raw_abstract is not None:
             # Remove <jats:title> tags and other XML tags
-            raw_abstract = re.sub(r'<jats:title>.*</jats:title>', '', raw_abstract)
-            raw_abstract = re.sub(r'<[^>]+>', '', raw_abstract).strip()
+            raw_abstract = re.sub(r"<jats:title>.*</jats:title>", "", raw_abstract)
+            raw_abstract = re.sub(r"<[^>]+>", "", raw_abstract).strip()
             # Remove tabs and new lines
-            raw_abstract = raw_abstract.replace('\t', '').replace('\n', '')
+            raw_abstract = raw_abstract.replace("\t", "").replace("\n", "")
             if len(raw_abstract) > 1:
                 return raw_abstract
 
@@ -396,16 +408,27 @@ class CrossrefArticle(Article):
 
     def to_df(self) -> pd.DataFrame:
         """Convert the parsed information to a pandas DataFrame."""
-        col_types = self.col_types()
-        col_types.update(
-            {
-                "publisher": "string",
-            })
+
         df = pd.DataFrame([self.to_dict()])
+        return _format_df(df)
+
+
+class ArticleCollection:
+    """Class for handling a collection of articles."""
+
+    def __init__(self, articles: Iterable[CrossrefArticle|dict]) -> None:
+        """Initialize the collection with a list of articles."""
+        
+        self.articles = (article if isinstance(article, CrossrefArticle) else CrossrefArticle(article) for article in articles)
+
+    def to_df(self) -> DataFrame:
+        """Convert the collection to a pandas DataFrame."""
+        df = pd.DataFrame([article.to_dict() for article in self.articles]) # type: ignore[assignment]
         df = _format_df(df)
-        """ df = pd.DataFrame([self.to_dict()]).astype(col_types)
-        df['publication_date'] = pd.to_datetime(df['publication_date']) """
+        if df.size == 0:
+            df = DataFrame(columns=CrossrefArticle.get_all_slots())
         return df
+
 
 def load_csv(path: str) -> DataFrame:
     """
@@ -415,6 +438,7 @@ def load_csv(path: str) -> DataFrame:
     df = pd.read_csv(path)
     df = _format_df(df)
     return df
+
 
 def _format_df(df: DataFrame) -> DataFrame:
     """
