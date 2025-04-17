@@ -55,7 +55,7 @@ class Article:
         dct = {key: self.__getattribute__(key) for key in self.get_all_slots()}
         for key, val in dct.items():
             if val is not None:
-                dct[key] = str(val)
+                dct[key] = str(val).lower()
         return dct
 
     @classmethod

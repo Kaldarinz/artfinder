@@ -18,6 +18,8 @@ from typing import (
 )
 import re
 from datetime import datetime
+from pathlib import Path
+import os
 
 import pandas as pd
 from pandas import DataFrame, Series
@@ -25,6 +27,7 @@ from pandas import DataFrame, Series
 from artfinder.article import PubMedArticle, CrossrefArticle
 from artfinder.crossref import Crossref
 from artfinder.dataclasses import CrossrefFilterField, DocumentType
+from artfinder.http_requests import FileDownloader
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 logger = logging.getLogger(__name__)
@@ -81,7 +84,9 @@ class ArtFinder:
             raise NotImplementedError("Only crossref support is implemented.")
 
         if title is not None:
-            df = Crossref(email=self.email).search(title).article().get_df(max_results=1)
+            df = (
+                Crossref(email=self.email).search(title).article().get_df(max_results=1)
+            )
         else:
             df = Crossref(email=self.email).doi(doi)  # type: ignore
         return pd.Series(df.iloc[0]) if not df.empty else pd.Series(index=df.columns)
@@ -193,7 +198,7 @@ class ArtFinder:
 
     def get_refs(self, articles: CrossrefArticle | Series | DataFrame) -> DataFrame:
         """
-        Get cited articles for given articles.
+        Get articles, cited in the given articles.
 
         Parameters
         ----------
@@ -223,3 +228,55 @@ class ArtFinder:
 
         dois = list(set(dois))
         return Crossref(email=self.email).get_dois(dois)
+
+    def download_pdf(
+        self,
+        articles: CrossrefArticle | Series | DataFrame,
+        path: str | None = None,
+        name: Literal["doi", "title"] = "title",
+        max_connections: int = 5,
+    ) -> FileDownloader:
+        """
+        Download pdf files for the given articles.
+
+        Parameters
+        ----------
+        articles : CrossrefArticle|Series|DataFrame
+            Article(s) to download pdf files for.
+            Series and DataFrame must contain a column with named "doi".
+        path : str | None
+            Path to save the pdf files. If None, pdfs folder will be
+            created in the current folder.
+        name : Literal["doi", "title"]
+            Name of the file. Can be either "doi" or "title".
+        max_connections : int
+            Maximum number of connections to use for downloading.
+
+        Returns
+        -------
+        None
+        """
+
+        if isinstance(articles, CrossrefArticle):
+            articles = articles.to_df()
+        elif isinstance(articles, Series):
+            articles = pd.DataFrame([articles])
+        elif not isinstance(articles, DataFrame):
+            raise TypeError("article must be CrossrefArticle, Series or DataFrame")
+
+        dois = articles["doi"].tolist()
+        titles = articles["title"].tolist()
+        if path is None:
+            path = os.path.join(os.getcwd(), "pdfs")
+        # create directory if it does not exist
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+        paths = [
+            os.path.join(path, f"{doi}.pdf" if name == "doi" else f"{title}.pdf")
+            for doi, title in zip(dois, titles)
+        ]
+        FileDownloader(
+            links=articles["link"].to_list(),
+            save_paths=paths,
+            concurency_limit=max_connections,
+        ).download_files()
