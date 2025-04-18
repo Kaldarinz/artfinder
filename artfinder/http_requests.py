@@ -264,8 +264,7 @@ class AsyncHTTPRequest:
 
         results = {result[0]: result[1] for result in gatered}
         if print_progress:
-            printer("Fetching completed.")
-            printer.close()
+            printer(f"Fetched {len(results)}/{tot_urls} URLs.")
         return results
 
     def async_get(

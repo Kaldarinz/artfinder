@@ -122,6 +122,7 @@ class Endpoint(ABC):
         result = self.get(
             url=self.request_url,
             params=request_params,
+            print_progress=False,
         )
 
         num_found = int(result.get("message", {}).get("total-results"))
@@ -175,10 +176,10 @@ class Endpoint(ABC):
                 self.status_line(
                     f"Fetching up to {self.request_params['rows']} items..."
                 )
-            logger.warning(f"{self.request_params=}")
             result = self.get(
                 url=self.request_url,
                 params=self.request_params,
+                print_progress=False,
             )
             if result is None:
                 self.status_line("Found nothing.")
@@ -197,6 +198,7 @@ class Endpoint(ABC):
                 result = self.get(
                     url=self.request_url,
                     params=request_params,
+                    print_progress=False,
                 )
 
                 if result is None:
@@ -212,9 +214,11 @@ class Endpoint(ABC):
                         )
                     return
                 else:
-                    items_obtained += len(result["message"]["items"])
+                    increment = len(result["message"]["items"])
+                    items_obtained += increment
                     self.status_line(
-                        f"Found {items_obtained} item{'s' if items_obtained > 1 else ''}. Fetching more..."
+                        f"Found {items_obtained} item{'s' if items_obtained > 1 else ''}."
+                         + f"{'Fetching more...' if increment == self.ROW_LIMIT else ''}"
                     )
                 for item in result["message"]["items"]:
                     yield item

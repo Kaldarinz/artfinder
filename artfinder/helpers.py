@@ -542,12 +542,8 @@ class LinePrinter:
             print(text, end="", flush=True)
 
     def close(self) -> None:
-        if "ipykernel" not in sys.modules:
+        if "ipykernel" in sys.modules:
             print()
-
-    def clear(self) -> None:
-        self('')
-        self.close()
 
     def __enter__(self) -> LinePrinter:
         return self
