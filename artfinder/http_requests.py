@@ -468,6 +468,7 @@ class FileDownloader:
             await printer_task
         except asyncio.CancelledError:
             pass
+        self.printer.close()
         return self
 
     async def periodic_print(self, period: float) -> None:
@@ -502,9 +503,20 @@ class FileDownloader:
         filename = os.path.basename(save_path)
         async with self.concurrency_limiter:
             with self.printer.get_line() as progress_line:
+                progress_line(f"Downloading File: {filename}")
                 async with session.get(url) as response:
                     if response.status == 200:
-                        await self._write_file(save_path, response, progress_line)
+                        # Check if the response is a CAPTCHA
+                        content_type = response.headers.get("Content-Type", "")
+                        if "text/html" in content_type:
+                            content = await response.text()
+                            if "captcha" in content.lower() or "verify" in content.lower():
+                                progress_line.update(
+                                    f"CAPTCHA detected. File: {filename}. URL: {url}"
+                                )
+                                self.failed.append((url, "CAPTCHA detected"))
+                        else:
+                            await self._write_file(save_path, response, progress_line)
                     elif response.status == 403:
                         self.restricted.append(url)
                         progress_line.update(
@@ -546,9 +558,10 @@ class FileDownloader:
         """
 
         filename = os.path.basename(path)
+        # Get total file size in kb
         total_size = int(
             response.headers.get("Content-Length", 0)
-        ) / 1024  # Get total file size in kb
+        ) / 1024  
         downloaded_size = 0
         with open(path, "wb") as f:
             try:
@@ -575,7 +588,7 @@ class FileDownloader:
                     os.remove(path)
                 return False
         self.downloaded.append(response.url)
-        progress_line.update(f"Downloaded {int(downloaded_size)} kb.: {filename}")
+        progress_line.update(f"Downloaded {int(downloaded_size)} kb. File: {filename}")
         return True
 
     def download_files(self) -> "FileDownloader":

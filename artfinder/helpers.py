@@ -8,7 +8,7 @@ import sys
 from ast import literal_eval
 
 try:
-    from IPython.display import DisplayHandle, display, clear_output
+    from IPython.display import DisplayHandle, display, clear_output, TextDisplayObject
 except ImportError:
     ...
 from typing import (
@@ -599,27 +599,25 @@ class MultiLinePrinter:
     """
 
     def __init__(self, lines: int, max_line_len: int = 80) -> None:
+        if "ipykernel" in sys.modules:
+            display(clear=True)
+            self.display_id = cast(DisplayHandle, display(display_id=True))
         self.lines_no = lines
         self.lines = [PrinterLine(i, False, self) for i in range(lines)]
         self.first_run = True
         self.max_line_len = max_line_len
+        self.num_printed_lines = 0
 
     def print(self) -> None:
         if "ipykernel" in sys.modules:
-            if not hasattr(self, "display_id"):
-                self.display_id = cast(DisplayHandle, display(display_id=True))
-            clear_output(wait=True)
-            print(
-                "\n".join(
-                    (self._format_line(self.lines[i]) for i in range(self._max_non_empty_index() + 1))
-                )
-            )
+            # IDK, this is the only way to make it work
+            self.display_id.update([self._format_line(self.lines[i]) for i in range(self._max_non_empty_index() + 1)], clear=True)
 
         else:
             if not self.first_run:
-                # clear lines
+                # clear printed lines if not first run
                 print(
-                    f"\033[{self._max_non_empty_index() + 1}A\033[1G\033[0J",
+                    f"\033[{self.num_printed_lines}A\033[1G\033[0J",
                     end="",
                     flush=True,
                 )
@@ -629,7 +627,9 @@ class MultiLinePrinter:
                 print(line_text)
             line_text = self._format_line(self.lines[-1])
             print(line_text, end="", flush=True)
+            self.num_printed_lines = self._max_non_empty_index() + 1
             self.first_run = False
+
 
     def _format_line(self, line: 'PrinterLine') -> str:
         """
@@ -659,8 +659,8 @@ class MultiLinePrinter:
         line.busy = False
 
     def close(self) -> None:
-        if "ipykernel" not in sys.modules:
-            print()
+        if "ipykernel" in sys.modules:
+            pass
         else:
             print()
 
