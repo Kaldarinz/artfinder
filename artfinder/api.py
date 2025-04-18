@@ -26,7 +26,7 @@ from pandas import DataFrame, Series
 
 from artfinder.article import PubMedArticle, CrossrefArticle
 from artfinder.crossref import Crossref
-from artfinder.dataclasses import CrossrefFilterField, DocumentType
+from artfinder.dataclasses import DocumentType
 from artfinder.http_requests import FileDownloader
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -271,11 +271,18 @@ class ArtFinder:
         # create directory if it does not exist
         Path(path).mkdir(parents=True, exist_ok=True)
 
+        # Regular expression to replace invalid characters
+        invalid_chars = re.compile(r'[<>:"/\\|?*\x00-\x1F]')
         paths = [
-            os.path.join(path, f"{doi}.pdf" if name == "doi" else f"{title}.pdf")
+            os.path.join(
+                path,
+                invalid_chars.sub(
+                    "_", f"{doi}.pdf" if name == "doi" else f"{title}.pdf"
+                ),
+            )
             for doi, title in zip(dois, titles)
         ]
-        FileDownloader(
+        return FileDownloader(
             links=articles["link"].to_list(),
             save_paths=paths,
             concurency_limit=max_connections,

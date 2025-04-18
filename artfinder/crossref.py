@@ -19,7 +19,6 @@ from pandas import DataFrame
 from artfinder.dataclasses import (
     CrossrefResource,
     CrossrefQueryField,
-    CrossrefFilterField,
     DocumentType,
 )
 from artfinder.http_requests import AsyncHTTPRequest

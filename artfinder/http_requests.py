@@ -14,7 +14,13 @@ from queue import Queue
 import os
 
 import asyncio
-from aiohttp import ClientSession, ClientTimeout, ClientError
+from aiohttp import (
+    ClientSession,
+    ClientTimeout,
+    ClientError,
+    StreamReader,
+    ClientResponse,
+)
 import pandas as pd
 from pandas import DataFrame
 
@@ -451,7 +457,7 @@ class FileDownloader:
         """
 
         self.status_line.update(f"Downloading {self.total_urls_num} files...")
-        printer_task = asyncio.create_task(self.periodic_print(0.1))
+        printer_task = asyncio.create_task(self.periodic_print(0.2))
         async with ClientSession() as session:
             tasks = [
                 self.download_file(session, url, save_path) for url, save_path in self
@@ -473,7 +479,9 @@ class FileDownloader:
                 self.print_status()
                 await asyncio.sleep(period)
         except asyncio.CancelledError:
-            self.printer.close()
+            # By some reason, if we call this, in VScode all output will be lost
+            # self.printer.print()
+            pass
 
     async def download_file(
         self, session: ClientSession, url: str, save_path: str
@@ -496,68 +504,85 @@ class FileDownloader:
             with self.printer.get_line() as progress_line:
                 async with session.get(url) as response:
                     if response.status == 200:
-                        total_size = int(
-                            response.headers.get("Content-Length", 0)
-                        )  # Get total file size
-                        downloaded_size = 0
-
-                        with open(save_path, "wb") as f:
-                            try:
-                                while chunk := await response.content.read(
-                                    self.chunk_size
-                                ):
-                                    f.write(chunk)
-                                    downloaded_size += len(chunk)
-                                    # Update progress for this task
-                                    progress = (
-                                        (downloaded_size / total_size) * 100
-                                        if total_size
-                                        else 0
-                                    )
-                                    # Format progress message
-                                    if total_size:
-                                        progress_line.update(
-                                            f"{filename}: Downloading: {progress:.2f}% ({downloaded_size/1024:.1f}/{total_size/1024:.1f} kb)"
-                                        )
-                                    else:
-                                        progress_line.update(
-                                            f"{filename}: Downloading: {downloaded_size/1024:.1f}"
-                                        )
-                            except ClientError as e:
-                                progress_line.update(
-                                    f"{filename}: Network error occurred: {e}"
-                                )
-                            except asyncio.IncompleteReadError as e:
-                                progress_line.update(
-                                    f"{filename}: Incomplete read error: {e}"
-                                )
-                        self.downloaded.append(url)
-                        progress_line.update(
-                            f"{filename}: File downloaded: {save_path}"
-                        )
+                        await self._write_file(save_path, response, progress_line)
                     elif response.status == 403:
                         self.restricted.append(url)
                         progress_line.update(
-                            f"{filename}: Access denied. HTTP status: {response.status}"
+                            f"Access denied. HTTP status: {response.status}. File: {filename}"
                         )
                     elif response.status == 404:
                         self.missing.append(url)
                         progress_line.update(
-                            f"{filename}: File not found. HTTP status: {response.status}"
+                            f"File not found. HTTP status: {response.status}. File: {filename}"
                         )
                     else:
                         self.failed.append((url, response.status))
                         progress_line.update(
-                            f"{filename}: Failed to download file. HTTP status: {response.status}"
+                            f"Failed to download file. HTTP status: {response.status}. File: {filename}"
                         )
                 self.print_status()
+
+    async def _write_file(
+        self, path: str, response: ClientResponse, progress_line: PrinterLine
+    ) -> bool:
+        """
+        Write the response content to a file and update the progress.
+        This method implies that the response status is 200.
+        If an error occurs, the partially downloaded file will be deleted.
+
+        Parameters
+        ----------
+        path : str
+            The path where the file will be saved.
+        response : ClientResponse
+            The response object containing the file content.
+        progress_line : PrinterLine
+            The line printer object used for displaying progress.
+        
+        Returns
+        -------
+        bool
+            True if the file was downloaded successfully, False otherwise.
+        """
+
+        filename = os.path.basename(path)
+        total_size = int(
+            response.headers.get("Content-Length", 0)
+        ) / 1024  # Get total file size in kb
+        downloaded_size = 0
+        with open(path, "wb") as f:
+            try:
+                while chunk := await response.content.read(self.chunk_size):
+                    f.write(chunk)
+                    downloaded_size += len(chunk) / 1024
+                    # Update progress for this task
+                    progress = (downloaded_size / total_size) * 100 if total_size else 0
+                    # Format progress message
+                    if total_size:
+                        progress_line.update(
+                            f"Downloading: {progress:.2f}% ({int(downloaded_size)}/{int(total_size)})"
+                          + f" kb. File: {filename})"
+                        )
+                    else:
+                        progress_line.update(
+                            f"Downloading: {int(downloaded_size)} kb. File: {filename}"
+                        )
+            except (ClientError, asyncio.IncompleteReadError) as e:
+                progress_line.update(f"Error: {e}. File: {filename}")
+                self.failed.append((response.url, e))
+                # Delete the partially downloaded file
+                if os.path.exists(path):
+                    os.remove(path)
+                return False
+        self.downloaded.append(response.url)
+        progress_line.update(f"Downloaded {int(downloaded_size)} kb.: {filename}")
+        return True
 
     def download_files(self) -> "FileDownloader":
         """
         Download files using URLs and paths provided at initialization.
         """
         return _execute_coro(self._download_files)
-        
 
 
 class Etiquette:
@@ -587,49 +612,6 @@ class Etiquette:
         """
 
         return {"user-agent": str(self)}
-
-
-def full_texts(
-    df: DataFrame, dois: list[str], save_paths: list[str] | None = None
-) -> None:
-    """
-    Download full texts from DOIs.
-
-    Parameters
-    ----------
-    dois: List[str]
-        List of DOIs to download.
-    save_paths: List[str]
-        List of paths to save the downloaded files.
-    """
-
-    pass
-
-
-def full_texts_from_urls(
-    urls: list[str], save_paths: list[str] | None = None, concurrent: int = 5
-) -> FileDownloader:
-    """
-    Download full texts from URLs.
-
-    Parameters
-    ----------
-    urls: List[str]
-        List of URLs to download.
-    save_paths: List[str]
-        List of paths to save the downloaded files.
-    concurrent: int
-        Number of concurrent downloads.
-    """
-    if save_paths is None:
-        save_paths = [
-            os.path.join("download", "file_" + str(i) + ".pdf")
-            for i in range(len(urls))
-        ]
-    if len(urls) != len(save_paths):
-        raise ValueError("Length of urls and save_paths must be the same.")
-    fdl = FileDownloader(urls, save_paths, concurrent)
-    return _execute_coro(fdl._download_files)
 
 
 def _execute_coro(func: Callable[P, Coroutine[Any, Any, T]], *args, **kwargs) -> T:
