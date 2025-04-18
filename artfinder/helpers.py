@@ -572,6 +572,9 @@ class MultiLinePrinter:
     ----------
     lines : int
         The number of lines to manage.
+    max_line_len : int
+        The maximum length of each line. 
+        Used to truncate long lines in terminal environments.
 
     Attributes
     ----------
@@ -595,10 +598,11 @@ class MultiLinePrinter:
     printer.close()
     """
 
-    def __init__(self, lines: int) -> None:
+    def __init__(self, lines: int, max_line_len: int = 80) -> None:
         self.lines_no = lines
         self.lines = [PrinterLine(i, False, self) for i in range(lines)]
         self.first_run = True
+        self.max_line_len = max_line_len
 
     def print(self) -> None:
         if "ipykernel" in sys.modules:
@@ -607,7 +611,7 @@ class MultiLinePrinter:
             clear_output(wait=True)
             print(
                 "\n".join(
-                    (self.lines[i].text for i in range(self._max_non_empty_index() + 1))
+                    (self._format_line(self.lines[i]) for i in range(self._max_non_empty_index() + 1))
                 )
             )
 
@@ -621,9 +625,19 @@ class MultiLinePrinter:
                 )
             # print lines
             for i in range(self._max_non_empty_index() + 1):
-                print(self.lines[i].text)
-            print(self.lines[-1].text, end="", flush=True)
+                line_text = self._format_line(self.lines[i])
+                print(line_text)
+            line_text = self._format_line(self.lines[-1])
+            print(line_text, end="", flush=True)
             self.first_run = False
+
+    def _format_line(self, line: 'PrinterLine') -> str:
+        """
+        Format the line text to fit within the maximum line length.
+        """
+        if len(line.text) > self.max_line_len:
+            return line.text[: self.max_line_len] + "..."
+        return line.text
 
     def _max_non_empty_index(self) -> int:
         """
