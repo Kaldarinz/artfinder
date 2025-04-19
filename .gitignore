@@ -3,3 +3,4 @@ venv/
 download/
 pdfs/
 test*
+.ipynb*
