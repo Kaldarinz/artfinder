@@ -1,9 +1,10 @@
+# SPDX-FileCopyrightText: 2025-present Anton Popov <a.popov.fizteh@gmail.com>
+#
+# SPDX-License-Identifier: MIT
 """
 Helper functions and constants for interacting with the Crossref API.
 
 This module is a part of the Artfinder package.
-Author: Anton Popov
-email: a.popov.fizteh@gmail.com
 """
 
 import logging

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025-present Anton Popov <a.popov.fizteh@gmail.com>
+#
+# SPDX-License-Identifier: MIT
 """API module."""
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ import os
 import pandas as pd
 from pandas import DataFrame, Series
 
-from artfinder.article import PubMedArticle, CrossrefArticle
+from artfinder.article import CrossrefArticle
 from artfinder.crossref import Crossref
 from artfinder.dataclasses import DocumentType
 from artfinder.http_requests import FileDownloader

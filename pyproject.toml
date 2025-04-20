@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "artfinder"
+dynamic = ["version"]
+description = ''
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "Anton Popov", email = "a.popov.fizteh@gmail.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = []
+
+[project.urls]
+Documentation = "https://github.com/Anton Popov/artfinder#readme"
+Issues = "https://github.com/Anton Popov/artfinder/issues"
+Source = "https://github.com/Anton Popov/artfinder"
+
+[tool.hatch.version]
+path = "src/artfinder/__about__.py"
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/artfinder tests}"
+
+[tool.coverage.run]
+source_pkgs = ["artfinder", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/artfinder/__about__.py",
+]
+
+[tool.coverage.paths]
+artfinder = ["src/artfinder", "*/artfinder/src/artfinder"]
+tests = ["tests", "*/artfinder/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]

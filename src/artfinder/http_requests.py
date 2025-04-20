@@ -1,9 +1,10 @@
+# SPDX-FileCopyrightText: 2025-present Anton Popov <a.popov.fizteh@gmail.com>
+#
+# SPDX-License-Identifier: MIT
 """
 AsyncHTTP request class for making requests.
 
 This module is part of the Artfinder package.
-Author: Anton Popov
-email: a.popov.fizteh@gmail.com
 """
 
 import logging
