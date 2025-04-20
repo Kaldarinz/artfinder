@@ -8,16 +8,9 @@ from __future__ import annotations
 import warnings
 import logging
 from typing import (
-    Any,
-    Dict,
-    Generator,
-    cast,
-    Callable,
     ParamSpec,
     TypeVar,
-    Coroutine,
     Literal,
-    Self,
 )
 import re
 from datetime import datetime
@@ -29,7 +22,6 @@ from pandas import DataFrame, Series
 
 from artfinder.article import CrossrefArticle
 from artfinder.crossref import Crossref
-from artfinder.dataclasses import DocumentType
 from artfinder.http_requests import FileDownloader
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)

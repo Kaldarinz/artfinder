@@ -6,21 +6,17 @@
 from __future__ import annotations
 
 import datetime
-import json
 import re
 from ast import literal_eval
 
-from typing import Any, Dict, List, Optional, cast, Iterable
+from typing import Any, Dict, List, Iterable
 
-from lxml.etree import _Element
-from typeguard import typechecked
 import pandas as pd
 from pandas import DataFrame
 
 
 
 # TODO: There should probably be only one Article class
-@typechecked
 class Article:
     """Base class for all articles."""
 
@@ -99,7 +95,6 @@ class Article:
         }
 
 
-@typechecked
 class CrossrefArticle(Article):
     """Data class that contains a Crossref article."""
 

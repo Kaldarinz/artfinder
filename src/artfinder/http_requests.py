@@ -19,11 +19,8 @@ from aiohttp import (
     ClientSession,
     ClientTimeout,
     ClientError,
-    StreamReader,
     ClientResponse,
 )
-import pandas as pd
-from pandas import DataFrame
 
 from artfinder.dataclasses import CrossrefRateLimit
 from artfinder.helpers import LinePrinter, MultiLinePrinter, PrinterLine

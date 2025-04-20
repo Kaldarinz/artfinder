@@ -14,7 +14,6 @@ from typing import Any, Self, TypeVar, cast, Generator
 import logging
 
 import requests
-import pandas as pd
 from pandas import DataFrame
 
 from artfinder.dataclasses import (

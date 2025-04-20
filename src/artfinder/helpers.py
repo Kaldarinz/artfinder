@@ -6,37 +6,19 @@
 
 from __future__ import annotations
 
-import datetime
 import re
 import sys
-from ast import literal_eval
 
 try:
-    from IPython.display import DisplayHandle, display, clear_output, TextDisplayObject
+    from IPython.display import DisplayHandle, display
 except ImportError:
     ...
 from typing import (
-    Generator,
     Optional,
-    Union,
     cast,
     TypeVar,
-    Callable,
-    Coroutine,
     ParamSpec,
-    Iterator,
-    Any,
 )
-from xml.etree.ElementTree import Element as EtreeElement
-import lxml.etree
-from lxml.etree import _Element as LxmlElement
-from typeguard import typechecked
-from typing_extensions import TypeAlias
-from pandas import DataFrame
-import pandas as pd
-
-
-Element: TypeAlias = Union[LxmlElement, EtreeElement]
 
 T = TypeVar("T", bound=Optional[str])
 P = ParamSpec("P")

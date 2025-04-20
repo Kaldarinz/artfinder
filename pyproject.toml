@@ -22,7 +22,11 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = []
+dependencies = [
+  "pandas",
+  "aiohttp",
+  "requests"
+]
 
 [project.urls]
 Documentation = "https://github.com/Kaldarinz/artfinder#readme"
