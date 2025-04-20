@@ -4,3 +4,4 @@ download/
 pdfs/
 test*
 .ipynb*
+dist/

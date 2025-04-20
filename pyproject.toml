@@ -25,9 +25,9 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Documentation = "https://github.com/Anton Popov/artfinder#readme"
-Issues = "https://github.com/Anton Popov/artfinder/issues"
-Source = "https://github.com/Anton Popov/artfinder"
+Documentation = "https://github.com/Kaldarinz/artfinder#readme"
+Issues = "https://github.com/Kaldarinz/artfinder/issues"
+Source = "https://github.com/Kaldarinz/artfinder"
 
 [tool.hatch.version]
 path = "src/artfinder/__about__.py"
