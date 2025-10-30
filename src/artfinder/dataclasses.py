@@ -599,7 +599,7 @@ class TextBlockPDF:
 
     @property
     def text(self) -> str:
-        return "\n".join(line.text for line in self.lines)
+        return "".join(line.text for line in self.lines)
     
     def insert_text_dicts(self) -> List[dict]:
         """Return list of dicts suitable for insert_text() method of Shape object."""
@@ -608,16 +608,21 @@ class TextBlockPDF:
         for line in self.lines:
             dcts.extend(line.insert_text_dicts())
         return dcts
-    
-    def __add__(self, other: "TextBlockPDF") -> "TextBlockPDF":
+
+    def __add__(self, other: "TextBlockPDF | TextLinePDF") -> "TextBlockPDF":
         """Summation of two TextBlock instances: concatenates lines and expands rect."""
-        if not isinstance(other, TextBlockPDF):
-            return NotImplemented
-        # Combine lines
-        new_lines = self.lines + other.lines
-        # Expand rect to include both
-        new_rect = Rect(self.rect)
-        new_rect.include_rect(other.rect)
+        if isinstance(other, TextBlockPDF):
+            # Combine lines
+            new_lines = self.lines + other.lines
+            # Expand rect to include both
+            new_rect = Rect(self.rect)
+            new_rect.include_rect(other.rect)
+        elif isinstance(other, TextLinePDF):
+            new_lines = self.lines + [other]
+            new_rect = Rect(self.rect)
+            new_rect.include_rect(other.rect)
+        else:
+            raise NotImplemented
         return TextBlockPDF(rect=new_rect, lines=new_lines)
 
 

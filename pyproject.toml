@@ -63,3 +63,12 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
 ]
+
+[tool.pytest.ini_options]
+addopts = [
+  "--import-mode=importlib",
+]
+filterwarnings = [
+  "ignore:.*SwigPy.*has no __module__ attribute:DeprecationWarning",
+  "ignore:.*swigvarlink.*has no __module__ attribute:DeprecationWarning",
+]

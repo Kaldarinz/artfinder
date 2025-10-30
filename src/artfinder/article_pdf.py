@@ -213,10 +213,15 @@ class ArticlePDF:
         return search_rect
 
     @cached_property
-    def figure_captions_cache(self) -> dict[int, tuple[FigureCaptionPDF, ...]]:
+    def _figure_captions_cache(self) -> dict[int, tuple[FigureCaptionPDF, ...]]:
         """Figure captions in the document."""
 
         return self._find_figure_captions()
+
+    @cached_property
+    def figure_captions(self) -> dict[int, str]:
+        """Figure captions in the document as text."""
+        return {fig_no: figure.caption.text for fig_no, figure in self.figures.items()}
 
     @cached_property
     def figures(self) -> dict[int, FigurePDF]:
@@ -356,7 +361,7 @@ class ArticlePDF:
         """
 
         return self._get_rects_by_type(
-            rect_type="figure_captions",
+            rect_type="_figure_captions",
             page_no=page_no,
             clip=clip,
             copy_rects=copy_rects,
@@ -1175,7 +1180,7 @@ class ArticlePDF:
         ) -> dict[int, tuple[FigureCaptionPDF]]:
             # Pattern: optional whitespace, 'Fig', optional '.' or 'ure' or 'ure.',
             # whitespace, digits, optional trailing '.'
-            pattern = r"^\s*Fig(?:\.|ure\.?|)\s+\d+\.?"
+            pattern = r"^\s*Fig(?:\.|ure\.?|)\s+\d+\W*"
             vertical_thr = 1
             fig_captures = []
             text_blocks = self._text_cache[page.number]  # type: ignore
@@ -1217,13 +1222,27 @@ class ArticlePDF:
                     i += 1
                     while i < num_blocks:
                         next_block = text_blocks[i]
-                        if (
-                            abs(next_block.lines[0].rect.y1 - block.lines[-1].rect.y1 - block.lines[-1].rect.height)
-                            < vertical_thr
-                        ):
-                            block = block + next_block
+                        # Blocks can include inner empty lines, so we should add lines by one.
+                        capture_extended = False
+                        lines_consumed = 0
+                        for j in range(len(next_block.lines)):
+                            next_line = next_block.lines[j]
+                            if (
+                                abs(next_line.rect.y1 - block.lines[-1].rect.y1 - block.lines[-1].rect.height)
+                                < vertical_thr
+                            ):
+                                block = block + next_line
+                                capture_extended = True
+                                lines_consumed += 1
+                            else:
+                                break
+                        # Full block was consumed, check the next block
+                        if lines_consumed == len(next_block.lines):
                             i += 1 
                             continue
+                        # If we did not extend caption, do not consume next block
+                        if not capture_extended:
+                            i -= 1
                         break
                     # remove matched pattern and extra blank lines from text
                     text = block.text.replace(pattern_text, "").strip()
@@ -1275,7 +1294,7 @@ class ArticlePDF:
 
     def _is_side_caption(self, page_no: int, caption_rect: Rect) -> bool:
 
-        page_captions = self.figure_captions_cache[page_no]
+        page_captions = self._figure_captions_cache[page_no]
         page_caption = [
             caption for caption in page_captions if caption.rect == caption_rect
         ][0]
@@ -1311,7 +1330,7 @@ class ArticlePDF:
         result: list[FigurePDF] = []
         page = self.file[page_no]
         page_width = page.rect.width
-        figure_captions = self.figure_captions_cache[page_no]
+        figure_captions = self._figure_captions_cache[page_no]
 
         # First we should find all figures with side captions
         side_capt_figures: list[FigurePDF] = []
