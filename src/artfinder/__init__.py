@@ -5,5 +5,6 @@
 from .api import ArtFinder
 from .crossref import Crossref
 from .article import CrossrefArticle
+from .article_pdf import ArticlePDF
 
-__all__ = ["CrossrefArticle", "Crossref", "ArtFinder"]
+__all__ = ["CrossrefArticle", "Crossref", "ArtFinder", "ArticlePDF"]

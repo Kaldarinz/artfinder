@@ -20,6 +20,8 @@ from typing import (
     ParamSpec,
 )
 
+from pymupdf import Rect
+
 T = TypeVar("T", bound=Optional[str])
 P = ParamSpec("P")
 
@@ -234,3 +236,44 @@ def strict_filter(title: str) -> bool:
     ]
     pattern += r"".join(exlude_parts)
     return re.search(pattern, title, re.IGNORECASE) is not None
+
+##########################
+### ArticlePDF helpers ###
+##########################
+    
+def rects_equal(rect1: Rect, rect2: Rect, threshold=1e-2) -> bool:
+    """
+    Compare two rects for equality within a given threshold.
+
+    Parameters
+    ----------
+    rect1, rect2 : rect-like 
+        The rectangles to compare.
+    threshold : float
+        Maximum allowed difference for each coordinate.
+
+    Returns
+    -------
+    bool
+        True if all coordinates differ by less than threshold, else False.
+    """
+    return all(abs(a - b) < threshold for a, b in zip(rect1, rect2))  # type: ignore
+
+
+def clip_to_grid(rect: Rect, digits=2) -> Rect:
+    """
+    Clip rectangle coordinates to a grid with specified decimal places.
+
+    Parameters
+    ----------
+    rect : Rect
+        The rectangle to clip.
+    digits : int
+        Number of decimal places to round to.
+
+    Returns
+    -------
+    Rect
+        New rectangle with clipped coordinates.
+    """
+    return Rect([round(coord, digits) for coord in rect])

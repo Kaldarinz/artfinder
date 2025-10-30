@@ -25,7 +25,9 @@ classifiers = [
 dependencies = [
   "pandas",
   "aiohttp",
-  "requests"
+  "requests",
+  "pymupdf",
+  "scikit-learn",
 ]
 
 [project.urls]
