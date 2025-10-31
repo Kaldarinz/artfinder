@@ -1252,10 +1252,7 @@ class ArticlePDF:
                                 "matched_pattern": pattern_text,
                                 "font_props": font_props,
                                 "text": text,
-                                "x0": block.rect.x0,
-                                "y0": block.rect.y0,
-                                "x1": block.rect.x1,
-                                "y1": block.rect.y1,
+                                "lines_no": len(block.lines),
                                 "rect": copy(block.rect),
                             }
                         )
@@ -1298,8 +1295,7 @@ class ArticlePDF:
         page_caption = [
             caption for caption in page_captions if caption.rect == caption_rect
         ][0]
-        lines_no = len(page_caption.text.splitlines())
-        if caption_rect.width < self.paragraph_width.mean / 2 and lines_no > 1:
+        if caption_rect.width < self.paragraph_width.mean / 2 and page_caption.lines_no > 1:
             return True
         return False
 

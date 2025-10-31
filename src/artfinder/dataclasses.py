@@ -599,7 +599,7 @@ class TextBlockPDF:
 
     @property
     def text(self) -> str:
-        return "".join(line.text for line in self.lines)
+        return " ".join(line.text.strip() for line in self.lines)
     
     def insert_text_dicts(self) -> List[dict]:
         """Return list of dicts suitable for insert_text() method of Shape object."""
@@ -649,10 +649,7 @@ class FigureCaptionPDF:
     matched_pattern: str
     text: str
     font_props: int
-    x0: float
-    y0: float
-    x1: float
-    y1: float
+    lines_no: int
     rect: Rect
 
 
