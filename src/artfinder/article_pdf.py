@@ -52,7 +52,7 @@ class ArticlePDF:
 
     COLUMN_NO_FITTING_FACTOR = 1.1
     "Factor to adjust column fitting when estimating number of columns."
-    HEADER_MAX_FRACTION = 0.1
+    HEADER_MAX_FRACTION = 0.09
     "Maximum fraction of page height to consider for header detection."
     RECTS_EQUAL_THR = 0.1
     "Coordinate threshold for considering two rectangles equal."
