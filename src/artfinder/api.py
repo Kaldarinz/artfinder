@@ -23,6 +23,7 @@ from pandas import DataFrame, Series
 from artfinder.article import CrossrefArticle
 from artfinder.crossref import Crossref
 from artfinder.http_requests import FileDownloader
+from artfinder.scimagojr import SciMagoJR
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 logger = logging.getLogger(__name__)
@@ -282,3 +283,21 @@ class ArtFinder:
             save_paths=paths,
             concurency_limit=max_connections,
         ).download_files()
+
+    def get_journal_info(self, *, title: str | None = None, issn: str | None = None) -> pd.Series | None:
+        """
+        Get journal impact factor by its title or ISSN.
+
+        Parameters
+        ----------
+        title : str | None
+            Title of the journal.
+        issn : str | None
+            ISSN of the journal.
+
+        Returns
+        -------
+        Impact factor of the journal or None if not found.
+        """
+    
+        return SciMagoJR("latest").get_ranking(title=title, issn=issn)
