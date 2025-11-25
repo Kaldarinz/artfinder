@@ -284,12 +284,14 @@ class ArtFinder:
             concurency_limit=max_connections,
         ).download_files()
 
-    def get_journal_info(self, *, title: str | None = None, issn: str | None = None) -> pd.Series | None:
+    def get_journal_info(self, *, article: CrossrefArticle | Series | None = None, title: str | None = None, issn: str | None = None) -> pd.Series | None:
         """
         Get journal impact factor by its title or ISSN.
 
         Parameters
         ----------
+        article : CrossrefArticle | None
+            Article to get journal info for. If provided, title and issn are ignored.
         title : str | None
             Title of the journal.
         issn : str | None
@@ -300,4 +302,8 @@ class ArtFinder:
         Impact factor of the journal or None if not found.
         """
     
+        if article is not None:
+            title = article.journal
+            issn = article.issn
+
         return SciMagoJR("latest").get_ranking(title=title, issn=issn)

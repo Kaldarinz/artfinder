@@ -32,7 +32,9 @@ class SciMagoJR:
     def get_ranking(self, title: str | None = None, issn: str | None = None) -> pd.Series | None:
         """Get the ranking for a given journal title or ISSN."""
         if title is not None:
+            title = title.replace("&amp;", "and")
             journal_data = self.all_data[self.all_data['Title'].str.lower() == title.lower()]
+            journal_data['title'] = title
         elif issn is not None:
             issn = re.sub(r'\D', '', issn)
             journal_data = self.all_data[self.all_data['Issn'] == issn]
@@ -42,5 +44,5 @@ class SciMagoJR:
     
         journal_data = journal_data[['Title', 'Type', 'Issn', 'Publisher', 'Open Access', 'SJR Best Quartile', 'Citations / Doc. (2years)', 'Country']]
         journal_data.columns = ['title', 'type', 'issn', 'publisher', 'open_access', 'quartile', 'if_2_years', 'country']
-        #journal_data['if_2_years'] = pd.to_numeric(journal_data['if_2_years'], errors='coerce')
+        journal_data['open_access'] = journal_data['open_access'].map({'Yes': '1', 'No': '0'})
         return journal_data.reset_index(drop=True).iloc[0] if not journal_data.empty else None

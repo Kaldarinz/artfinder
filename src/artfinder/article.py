@@ -53,7 +53,10 @@ class Article:
         dct = {key: self.__getattribute__(key) for key in self.get_all_slots()}
         for key, val in dct.items():
             if val is not None:
-                dct[key] = str(val).lower()
+                if key in ["authors", "journal"]:
+                    dct[key] = str(val)
+                else:
+                    dct[key] = str(val).lower()
         return dct
 
     @classmethod
@@ -138,7 +141,7 @@ class CrossrefArticle(Article):
         journal = data.get("container-title", [""])
         if len(journal) == 0 or journal[0] == "":
             return None
-        return journal[0].strip()
+        return journal[0].strip().replace("&amp;", "and")
 
     def _extract_title(self, data: dict[str, Any]) -> str | None:
         """Extract the title from the data."""
@@ -168,8 +171,8 @@ class CrossrefArticle(Article):
             affiliation = author.get("affiliation")
             if isinstance(affiliation, dict):
                 author_new["affiliation"] = affiliation.get("name")
-            else:
-                author_new["affiliation"] = None
+            if author.get("ORCID"):
+                author_new["orcid"] = author.get("ORCID").split("/")[-1]
             authors_list[i] = author_new
         return authors_list
 
@@ -285,7 +288,7 @@ def _format_df(df: DataFrame) -> DataFrame:
         if col not in df.columns:
             df[col] = pd.NA
     # Convert to lower case
-    for col in ["title", "abstract", "authors", "journal", "publisher"]:
+    for col in ["title", "abstract", "publisher"]:
         df[col] = df[col].str.lower()
     # convert to python objects to python types
     for col in ["license", "link", "authors", "references"]:
@@ -294,5 +297,5 @@ def _format_df(df: DataFrame) -> DataFrame:
         )
     # apply column types
     df = df.astype(CrossrefArticle.col_types())
-    df["publication_date"] = pd.to_datetime(df["publication_date"], errors="coerce")
+    df["publication_date"] = pd.to_datetime(df["publication_date"], errors="coerce").dt.date
     return df
