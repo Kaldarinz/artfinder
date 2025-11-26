@@ -33,8 +33,8 @@ class SciMagoJR:
         """Get the ranking for a given journal title or ISSN."""
         if title is not None:
             title = title.replace("&amp;", "and")
-            journal_data = self.all_data[self.all_data['Title'].str.lower() == title.lower()]
-            journal_data['title'] = title
+            journal_data = self.all_data[self.all_data['Title'].str.lower() == title.lower()].copy()
+            journal_data.loc[:, 'title'] = title
         elif issn is not None:
             issn = re.sub(r'\D', '', issn)
             journal_data = self.all_data[self.all_data['Issn'] == issn]
