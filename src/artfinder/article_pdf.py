@@ -566,6 +566,38 @@ class ArticlePDF:
             copy_objects=copy_objects
         )
 
+    def get_doi(self) -> str | None:
+        """
+        Get DOI of the article from the PDF metadata or article text.
+
+        This method may fail if the doi is missing in metadata and text was OCRed poorly.
+        This is especially true for scanned old documents.
+
+        Returns
+        -------
+        str
+            DOI string if found, otherwise empty string.
+        """
+        # Search for DOI pattern in the text
+        doi_pattern = re.compile(r"10.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
+
+        # Try to get DOI from PDF metadata
+        metadata = cast(dict[str, str], self.file.metadata)
+        if (subj:=metadata.get("subject")):
+            found_doi = doi_pattern.search(subj)
+            if found_doi:
+                return found_doi.group().lower()
+
+        for page in self.file:
+            page_text = page.get_text()
+            if isinstance(page_text, str):
+                found_doi = doi_pattern.search(page_text)
+                if found_doi:
+                    return found_doi.group().lower()
+        warn(f"DOI not found in metadata or text of {self}.")
+        return None
+        
+
     def extract_figure_drawings(
         self,
         figure_no: int | None = None,
