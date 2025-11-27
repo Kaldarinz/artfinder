@@ -63,7 +63,7 @@ class ArticlePDF:
     MARGIN = 2
     "Margin in points for rectangles."
 
-    def __init__(self, pdf_path: PathLike | str, identifier: str = ""):
+    def __init__(self, pdf_path: PathLike | str | None = None, *, stream:bytes | None = None, identifier: str = ""):
         """
         Initialize Article with a PDF file.
 
@@ -80,12 +80,20 @@ class ArticlePDF:
             If the file cannot be opened as a PDF.
         """
         self.identifier = identifier
-        self.path = Path(pdf_path)
-        if not self.path.exists():
-            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+        self.path: Path | None = None
+        if pdf_path is None and stream is None:
+            raise ValueError("Either pdf_path or stream must be provided.")
+        if pdf_path is not None:
+            pass
+            self.path = Path(pdf_path)
+            if not self.path.exists():
+                raise FileNotFoundError(f"PDF file not found: {pdf_path}")
 
         try:
-            self.file = pymupdf.open(str(self.path))
+            if self.path is not None:
+                self.file = pymupdf.open(str(self.path))
+            else:
+                self.file = pymupdf.open(stream=stream, filetype="pdf")
             if len(self.identifier) == 0:
                 self.identifier = self.file.name.split("/")[-1] # type: ignore
         except Exception as e:
@@ -122,7 +130,7 @@ class ArticlePDF:
             self.file.close()
 
     def __repr__(self):
-        return f"Article('{self.path.name}', pages={len(self.file)})"
+        return f"Article('{self.identifier}', pages={len(self.file)})"
 
     # Cached properties for expensive computations
 
@@ -913,7 +921,7 @@ class ArticlePDF:
                 shape.commit()
 
         if output_path is None:
-            output_path = Path(f"marked_{self.path.name}").resolve()
+            output_path = Path(f"marked_{self.identifier}").resolve()
         else:
             output_path = Path(output_path).resolve()
             output_path.mkdir(parents=True, exist_ok=True)

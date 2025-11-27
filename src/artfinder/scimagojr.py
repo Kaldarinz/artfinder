@@ -31,18 +31,23 @@ class SciMagoJR:
         
     def get_ranking(self, title: str | None = None, issn: str | None = None) -> pd.Series | None:
         """Get the ranking for a given journal title or ISSN."""
+        journal_data = pd.DataFrame()
+        if title is None and issn is None:
+            logger.error("Either title or issn must be provided.")
+            return None
         if title is not None:
             title = title.replace("&amp;", "and")
             journal_data = self.all_data[self.all_data['Title'].str.lower() == title.lower()].copy()
-            journal_data.loc[:, 'title'] = title
-        elif issn is not None:
+            if not journal_data.empty:
+                journal_data.loc[:, 'title'] = title
+        if journal_data.empty and not pd.isna(issn):
             issn = re.sub(r'\D', '', issn)
             journal_data = self.all_data[self.all_data['Issn'] == issn]
-        else:
-            logger.error("Either title or issn must be provided.")
+        if journal_data.empty:
+            logger.error("Journal not found in SciMagoJR data.")
             return None
     
         journal_data = journal_data[['Title', 'Type', 'Issn', 'Publisher', 'Open Access', 'SJR Best Quartile', 'Citations / Doc. (2years)', 'Country']]
         journal_data.columns = ['title', 'type', 'issn', 'publisher', 'open_access', 'quartile', 'if_2_years', 'country']
         journal_data['open_access'] = journal_data['open_access'].map({'Yes': '1', 'No': '0'})
-        return journal_data.reset_index(drop=True).iloc[0] if not journal_data.empty else None
+        return journal_data.reset_index(drop=True).iloc[0]
