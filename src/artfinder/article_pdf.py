@@ -63,7 +63,7 @@ class ArticlePDF:
     MARGIN = 2
     "Margin in points for rectangles."
 
-    def __init__(self, pdf_path: PathLike | str | None = None, *, stream:bytes | None = None, identifier: str = ""):
+    def __init__(self, pdf: PathLike | str | bytes, identifier: str = ""):
         """
         Initialize Article with a PDF file.
 
@@ -79,25 +79,6 @@ class ArticlePDF:
         ValueError
             If the file cannot be opened as a PDF.
         """
-        self.identifier = identifier
-        self.path: Path | None = None
-        if pdf_path is None and stream is None:
-            raise ValueError("Either pdf_path or stream must be provided.")
-        if pdf_path is not None:
-            pass
-            self.path = Path(pdf_path)
-            if not self.path.exists():
-                raise FileNotFoundError(f"PDF file not found: {pdf_path}")
-
-        try:
-            if self.path is not None:
-                self.file = pymupdf.open(str(self.path))
-            else:
-                self.file = pymupdf.open(stream=stream, filetype="pdf")
-            if len(self.identifier) == 0:
-                self.identifier = self.file.name.split("/")[-1] # type: ignore
-        except Exception as e:
-            raise ValueError(f"Failed to open PDF file: {e}")
 
         self._text_cache: dict[int, tuple[TextBlockPDF, ...]] = KeyedDict(
             self._get_text_blocks_from_page
@@ -116,6 +97,26 @@ class ArticlePDF:
         """Figures keyed by page number."""
         self._figure_no_to_page_ind: dict[int, int] = {}
 
+        self.identifier = identifier
+        if isinstance(pdf, (PathLike, str)):
+            self.path = Path(pdf)
+            self.identifier = self.path.name
+            if not self.path.exists():
+                raise FileNotFoundError(f"PDF file not found: {pdf}")
+        try:
+            if hasattr(self, "path"):
+                self.file = pymupdf.open(str(self.path))
+            else:
+                self.file = pymupdf.open(stream=pdf, filetype="pdf")
+        except Exception as e:
+            raise ValueError(f"Failed to open PDF file: {e}")
+
+        if len(self.identifier) == 0:
+            if self.doi is not None:
+                self.identifier = self.make_valid_filename(self.doi)
+            else:
+                self.identifier = self.make_valid_filename(self.file[0].get_text()[:50]) # type: ignore
+
     def __enter__(self):
         """Context manager entry."""
         return self
@@ -132,7 +133,40 @@ class ArticlePDF:
     def __repr__(self):
         return f"Article('{self.identifier}', pages={len(self.file)})"
 
+    @staticmethod
+    def make_valid_filename(name: str) -> str:
+        """
+        Make a valid filename from a given string.
+
+        Parameters
+        ----------
+        name : str
+            Input string to convert to a valid filename.
+
+        Returns
+        -------
+        str
+            Valid filename string.
+        """
+
+        # Replace invalid characters with underscores
+        valid_name = re.sub(r'[<>:"/\\|?*\n\r\t]', '_', name)
+        # Truncate to a reasonable length
+        return valid_name[:255]
+
     # Cached properties for expensive computations
+    @cached_property
+    def doi(self) -> str | None:
+        """
+        DOI of the article.
+
+        Returns
+        -------
+        str | None
+            DOI string if found, otherwise None.
+        """
+
+        return self._get_doi()
 
     @cached_property
     def paragraph_width(self) -> Size:
@@ -574,7 +608,7 @@ class ArticlePDF:
             copy_objects=copy_objects
         )
 
-    def get_doi(self) -> str | None:
+    def _get_doi(self) -> str | None:
         """
         Get DOI of the article from the PDF metadata or article text.
 
