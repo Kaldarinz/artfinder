@@ -621,7 +621,7 @@ class ArticlePDF:
             DOI string if found, otherwise empty string.
         """
         # Search for DOI pattern in the text
-        doi_pattern = re.compile(r"10.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
+        doi_pattern = re.compile(r"10.\d{4,9}/[-._;()/:A-Z0-9]+(?<!\.)", re.IGNORECASE)
 
         # Try to get DOI from PDF metadata
         metadata = cast(dict[str, str], self.file.metadata)
