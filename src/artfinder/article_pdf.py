@@ -620,25 +620,32 @@ class ArticlePDF:
         str
             DOI string if found, otherwise empty string.
         """
-        # Search for DOI pattern in the text
-        doi_pattern = re.compile(r"10.\d{4,9}/[-._;()/:A-Z0-9]+(?<!\.)", re.IGNORECASE)
 
         # Try to get DOI from PDF metadata
         metadata = cast(dict[str, str], self.file.metadata)
         if (subj:=metadata.get("subject")):
-            found_doi = doi_pattern.search(subj)
-            if found_doi:
-                return found_doi.group().lower()
+            doi = self.extract_doi_from_text(subj)
+            if doi:
+                return doi
 
         for page in self.file:
             page_text = page.get_text()
             if isinstance(page_text, str):
-                found_doi = doi_pattern.search(page_text)
-                if found_doi:
-                    return found_doi.group().lower()
+                doi = self.extract_doi_from_text(page_text)
+                if doi is not None:
+                    return doi
         warn(f"DOI not found in metadata or text of {self}.")
         return None
         
+    @classmethod
+    def extract_doi_from_text(cls, text: str) -> str | None:
+
+        # Search for DOI pattern in the text
+        doi_pattern = re.compile(r"10.\d{4,9}/[-._;()/:A-Z0-9]+(?<!\.)", re.IGNORECASE)
+        found_doi = doi_pattern.search(text)
+        if found_doi is not None:
+            found_doi = found_doi.group().lower()
+        return found_doi
 
     def extract_figure_drawings(
         self,

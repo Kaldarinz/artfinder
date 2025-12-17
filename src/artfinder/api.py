@@ -286,7 +286,7 @@ class ArtFinder:
 
     def get_journal_info(self, *, article: CrossrefArticle | Series | None = None, title: str | None = None, issn: str | None = None) -> pd.Series | None:
         """
-        Get journal impact factor by its title or ISSN.
+        Get journal impact factor by its title or ISSN. Or get journal info from article.
 
         Parameters
         ----------
