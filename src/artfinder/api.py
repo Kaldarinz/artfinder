@@ -305,5 +305,5 @@ class ArtFinder:
         if article is not None:
             title = article.journal
             issn = article.issn
-
+        logger.info(f"Getting journal info for title: {title}, issn: {issn}")
         return SciMagoJR("latest").get_ranking(title=title, issn=issn)
