@@ -8,9 +8,7 @@ Classes for handling SciMagoJR data.
 import logging
 import re
 from pathlib import Path
-from typing import cast
 
-from numpy import true_divide
 import pandas as pd
 from pyiso4.ltwa import Abbreviate
 
@@ -111,4 +109,7 @@ class SciMagoJR:
         # Format Categories
         cats = journal_data["categories"].replace(";", ",")
         journal_data["categories"] = re.sub(r"\s*\(Q\d\)", "", cats)
+
+        # Format areas
+        journal_data["areas"] = journal_data["areas"].replace(";", ",")
         return journal_data

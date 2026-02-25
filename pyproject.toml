@@ -10,9 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 keywords = []
-authors = [
-  { name = "Anton Popov", email = "a.popov.fizteh@gmail.com" },
-]
+authors = [{ name = "Anton Popov", email = "a.popov.fizteh@gmail.com" }]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
@@ -28,6 +26,7 @@ dependencies = [
   "requests",
   "pymupdf",
   "scikit-learn",
+  "pyiso4",
 ]
 
 [project.urls]
@@ -39,9 +38,7 @@ Source = "https://github.com/Kaldarinz/artfinder"
 path = "src/artfinder/__about__.py"
 
 [tool.hatch.envs.types]
-extra-dependencies = [
-  "mypy>=1.0.0",
-]
+extra-dependencies = ["mypy>=1.0.0"]
 [tool.hatch.envs.types.scripts]
 check = "mypy --install-types --non-interactive {args:src/artfinder tests}"
 
@@ -49,25 +46,17 @@ check = "mypy --install-types --non-interactive {args:src/artfinder tests}"
 source_pkgs = ["artfinder", "tests"]
 branch = true
 parallel = true
-omit = [
-  "src/artfinder/__about__.py",
-]
+omit = ["src/artfinder/__about__.py"]
 
 [tool.coverage.paths]
 artfinder = ["src/artfinder", "*/artfinder/src/artfinder"]
 tests = ["tests", "*/artfinder/tests"]
 
 [tool.coverage.report]
-exclude_lines = [
-  "no cov",
-  "if __name__ == .__main__.:",
-  "if TYPE_CHECKING:",
-]
+exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
 
 [tool.pytest.ini_options]
-addopts = [
-  "--import-mode=importlib",
-]
+addopts = ["--import-mode=importlib"]
 filterwarnings = [
   "ignore:.*SwigPy.*has no __module__ attribute:DeprecationWarning",
   "ignore:.*swigvarlink.*has no __module__ attribute:DeprecationWarning",
