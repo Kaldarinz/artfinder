@@ -28,7 +28,7 @@ class Article:
         "doi",
         "type",
         "keywords",
-        "is_referenced_by_count",
+        "citation_count",
         "abstract",
         "publisher",
         "issn",
@@ -93,7 +93,7 @@ class Article:
             "issue": "string",
             "start_page": "string",
             "end_page": "string",
-            "is_referenced_by_count": "int",
+            "citation_count": "int",
         }
 
 
@@ -125,7 +125,7 @@ class CrossrefArticle(Article):
         # others require processing
         self.title = self._extract_title(data)
         self.authors = self._extract_authors(data)
-        self.is_referenced_by_count = data.get("is-referenced-by-count", None)
+        self.citation_count = data.get("is-referenced-by-count", None)
         self.journal = self._extract_journal(data)
         self.issn = self._extract_issn(data)
         self.start_page, self.end_page = self._extract_pages(data)
@@ -209,7 +209,7 @@ class CrossrefArticle(Article):
             if author.get("ORCID"):
                 author_new["orcid"] = author.get("ORCID").split("/")[-1]
             if author.get("sequence"):
-                author_new["sequence"] = author.get("sequence")
+                author_new["position"] = author.get("sequence")
             authors_list[i] = author_new
         return authors_list
 
