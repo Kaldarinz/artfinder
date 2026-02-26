@@ -15,7 +15,6 @@ import pandas as pd
 from pandas import DataFrame
 
 
-
 # TODO: There should probably be only one Article class
 class Article:
     """Base class for all articles."""
@@ -40,6 +39,7 @@ class Article:
         "references",
         "pmid",
         "pmcid",
+        "funder",
         "license",
     )
 
@@ -89,7 +89,6 @@ class Article:
             "doi": "string",
             "type": "string",
             "journal": "string",
-            "issn": "string",
             "volume": "string",
             "issue": "string",
             "start_page": "string",
@@ -119,7 +118,6 @@ class CrossrefArticle(Article):
             "license",
             "type",
             "volume",
-            "link",
         ]
         for field in accept_fields:
             setattr(self, field, data.get(field, None))
@@ -135,6 +133,39 @@ class CrossrefArticle(Article):
         self.publication_date = self._extrac_date(data)
         self.abstract = self._extract_abstract(data)
         self.doi = data.get("DOI", None)
+        self.funder = self._extract_funder(data)
+        self.link = self._extract_link(data)
+
+    def _extract_link(self, data: dict[str, Any]) -> List[dict[str, str | None]]:
+        """Extract the link from the data."""
+
+        link_list_raw = data.get("link", [])
+        link_list = []
+        for link in link_list_raw:
+            link_new = {}
+            if link.get("URL"):
+                link_new["url"] = link.get("URL")
+            if link.get("content-type"):
+                link_new["content_type"] = link.get("content-type")
+            if len(link_new):
+                link_list.append(link_new)
+        return link_list
+
+    def _extract_funder(self, data: dict[str, Any]) -> List[dict[str, str | None]]:
+        """Extract the funder info from the data."""
+
+        funder_list_raw = data.get("funder", [])
+        funder_list = []
+        for funder in funder_list_raw:
+            funder_new = {}
+            if funder.get("name"):
+                funder_new["name"] = funder.get("name")
+            if funder.get("DOI"):
+                funder_new["doi"] = funder.get("DOI")
+            if len(funder.get("award", [])):
+                funder_new["number"] = funder.get("award")[0]
+            funder_list.append(funder_new)
+        return funder_list
 
     def _extract_journal(self, data: dict[str, Any]) -> str | None:
         """Extract the journal from the data."""
@@ -153,7 +184,9 @@ class CrossrefArticle(Article):
         title = re.sub(r"&lt;/?title&gt;", "", title[0])
         return title.strip()
 
-    def _extract_authors(self, data: dict[str, Any]) -> List[dict[str, str | None]]:
+    def _extract_authors(
+        self, data: dict[str, Any]
+    ) -> List[dict[str, str | list[str] | None]]:
         """Extract the authors from the data."""
 
         authors_list = data.get("author", [])
@@ -169,25 +202,26 @@ class CrossrefArticle(Article):
             else:
                 author_new["firstname"] = author.get("firstname")
             affiliation = author.get("affiliation")
-            if isinstance(affiliation, dict):
-                author_new["affiliation"] = affiliation.get("name")
+            if isinstance(affiliation, list):
+                author_new["affiliation"] = [
+                    aff.get("name") for aff in affiliation if aff.get("name")
+                ]
             if author.get("ORCID"):
                 author_new["orcid"] = author.get("ORCID").split("/")[-1]
+            if author.get("sequence"):
+                author_new["sequence"] = author.get("sequence")
             authors_list[i] = author_new
         return authors_list
 
-    def _extract_issn(self, data: dict[str, Any]) -> str | None:
+    def _extract_issn(self, data: dict[str, Any]) -> list[str]:
         """Extract the ISSN from the data."""
 
-        issn_list = data.get("issn-type", [])
+        issn_list_raw = data.get("issn-type", [])
+        issn_list = []
         # get issn value in the following order: electronic, print
-        for issn in issn_list:
-            if issn.get("type") == "electronic":
-                return issn.get("value")
-        for issn in issn_list:
-            if issn.get("type") == "print":
-                return issn.get("value")
-        return None
+        for issn in issn_list_raw:
+            issn_list.append(re.sub(r"\W+", "", issn.get("value", "")))
+        return issn_list
 
     def _extract_pages(self, data: dict[str, Any]) -> tuple[str | None, str | None]:
         """Extract the start and end pages from the data."""
@@ -199,7 +233,7 @@ class CrossrefArticle(Article):
             return pages[0], None
         return None, None
 
-    def _extract_references(self, data: dict[str, Any]) -> List[str] | None:
+    def _extract_references(self, data: dict[str, Any]) -> List[str]:
         """Extract the references from the data."""
         references = data.get("reference", None)
         ref_list = (
@@ -207,7 +241,7 @@ class CrossrefArticle(Article):
             if references
             else []
         )
-        return ref_list if len(ref_list) else None
+        return ref_list
 
     def _extrac_date(self, data: dict[str, Any]) -> datetime.date | None:
         """Extract the publication date from the data."""
@@ -253,14 +287,21 @@ class CrossrefArticle(Article):
 class ArticleCollection:
     """Class for handling a collection of articles."""
 
-    def __init__(self, articles: Iterable[CrossrefArticle|dict]) -> None:
+    def __init__(self, articles: Iterable[CrossrefArticle | dict]) -> None:
         """Initialize the collection with a list of articles."""
-        
-        self.articles = (article if isinstance(article, CrossrefArticle) else CrossrefArticle(article) for article in articles)
+
+        self.articles = (
+            (
+                article
+                if isinstance(article, CrossrefArticle)
+                else CrossrefArticle(article)
+            )
+            for article in articles
+        )
 
     def to_df(self) -> DataFrame:
         """Convert the collection to a pandas DataFrame."""
-        df = pd.DataFrame([article.to_dict() for article in self.articles]) # type: ignore[assignment]
+        df = pd.DataFrame([article.to_dict() for article in self.articles])  # type: ignore[assignment]
         df = _format_df(df)
         if df.size == 0:
             df = DataFrame(columns=CrossrefArticle.get_all_slots())
@@ -297,5 +338,7 @@ def _format_df(df: DataFrame) -> DataFrame:
         )
     # apply column types
     df = df.astype(CrossrefArticle.col_types())
-    df["publication_date"] = pd.to_datetime(df["publication_date"], errors="coerce").dt.date
+    df["publication_date"] = pd.to_datetime(
+        df["publication_date"], errors="coerce"
+    ).dt.date
     return df
