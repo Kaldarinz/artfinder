@@ -24,7 +24,7 @@ class Article:
         "authors",
         "journal",
         "publication_date",
-        "link",
+        "links",
         "doi",
         "type",
         "keywords",
@@ -37,9 +37,7 @@ class Article:
         "start_page",
         "end_page",
         "references",
-        "pmid",
-        "pmcid",
-        "funder",
+        "funders",
         "license",
     )
 
@@ -133,8 +131,8 @@ class CrossrefArticle(Article):
         self.publication_date = self._extrac_date(data)
         self.abstract = self._extract_abstract(data)
         self.doi = data.get("DOI", None)
-        self.funder = self._extract_funder(data)
-        self.link = self._extract_link(data)
+        self.funders = self._extract_funder(data)
+        self.links = self._extract_link(data)
 
     def _extract_link(self, data: dict[str, Any]) -> List[dict[str, str | None]]:
         """Extract the link from the data."""
@@ -209,7 +207,16 @@ class CrossrefArticle(Article):
             if author.get("ORCID"):
                 author_new["orcid"] = author.get("ORCID").split("/")[-1]
             if author.get("sequence"):
-                author_new["position"] = author.get("sequence")
+                if i == len(authors_list) - 1:
+                    author_new["position"] = "last"
+                else:
+                    author_new["position"] = author.get("sequence")
+            elif i == 0:
+                author_new["position"] = "first"
+            elif i == len(authors_list) - 1:
+                author_new["position"] = "last"
+            else:
+                author_new["position"] = "additional"
             authors_list[i] = author_new
         return authors_list
 
@@ -332,7 +339,7 @@ def _format_df(df: DataFrame) -> DataFrame:
     for col in ["title", "abstract", "publisher"]:
         df[col] = df[col].str.lower()
     # convert to python objects to python types
-    for col in ["license", "link", "authors", "references"]:
+    for col in ["license", "links", "authors", "references", "funders"]:
         df[col] = (
             df[col].fillna("None").str.replace("none", "None").transform(literal_eval)
         )
