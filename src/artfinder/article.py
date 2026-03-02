@@ -78,8 +78,8 @@ class Article:
                 slots.extend(base.__slots__)
         return slots
 
-    @staticmethod
-    def col_types() -> dict[str, str]:
+    @classmethod
+    def col_types(cls) -> dict[str, str]:
         """Return dictionary with column names and their types."""
         return {
             "abstract": "string",
@@ -133,6 +133,12 @@ class CrossrefArticle(Article):
         self.doi = data.get("DOI", None)
         self.funders = self._extract_funder(data)
         self.links = self._extract_link(data)
+        self.keywords = self._extract_keywords(data)
+
+    def _extract_keywords(self, data: dict[str, Any]) -> list[str]:
+        """Extract the keywords from the data."""
+        keywords = data.get("subject", [])
+        return [keyword.strip().lower() for keyword in keywords if keyword.strip()]
 
     def _extract_link(self, data: dict[str, Any]) -> List[dict[str, str | None]]:
         """Extract the link from the data."""
@@ -339,7 +345,7 @@ def _format_df(df: DataFrame) -> DataFrame:
     for col in ["title", "abstract", "publisher"]:
         df[col] = df[col].str.lower()
     # convert to python objects to python types
-    for col in ["license", "links", "authors", "references", "funders"]:
+    for col in ["license", "links", "authors", "references", "funders", "keywords"]:
         df[col] = (
             df[col].fillna("None").str.replace("none", "None").transform(literal_eval)
         )
