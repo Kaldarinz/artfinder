@@ -37,15 +37,23 @@ class ArtFinder:
     Base class for ArtFinder API.
     """
 
-    def __init__(self, email: str | None = None) -> None:
+    def __init__(self, email: str | None = None, print_status: bool = True) -> None:
         """
         Initialize the ArtFinder object.
+
+        Parameters
+        ----------
+        email : str | None
+            Email to use for API requests. Setting email is recommended for better service from APIs.
+        print_status : bool
+            Whether to print status messages during API requests.
 
         Returns
         -------
         None
         """
         self.email = email
+        self.print_status = print_status
 
     def find_article(
         self,
@@ -81,10 +89,13 @@ class ArtFinder:
 
         if title is not None:
             df = (
-                Crossref(email=self.email).search(title).article().get_df(max_results=1)
+                Crossref(email=self.email, print_status=self.print_status)
+                .search(title)
+                .article()
+                .get_df(max_results=1)
             )
         else:
-            df = Crossref(email=self.email).doi(doi)  # type: ignore
+            df = Crossref(email=self.email, print_status=self.print_status).doi(doi)  # type: ignore
         return pd.Series(df.iloc[0]) if not df.empty else pd.Series(index=df.columns)
 
     def search(
@@ -131,7 +142,7 @@ class ArtFinder:
                 "At least one of query, author, pub_since or pub_until must be provided."
             )
         return (
-            Crossref(email=self.email)
+            Crossref(email=self.email, print_status=self.print_status)
             .search(query)
             .author(author)
             .filter(from_pub_date=pub_since)
@@ -183,7 +194,7 @@ class ArtFinder:
                 "At least one of query, author, pub_since or pub_until must be provided."
             )
         return (
-            Crossref(email=self.email)
+            Crossref(email=self.email, print_status=self.print_status)
             .search(query)
             .author(author)
             .filter(from_pub_date=pub_since)
@@ -223,7 +234,7 @@ class ArtFinder:
             raise TypeError("article must be CrossrefArticle, Series or DataFrame")
 
         dois = list(set(dois))
-        return Crossref(email=self.email).get_dois(dois)
+        return Crossref(email=self.email, print_status=self.print_status).get_dois(dois)
 
     def download_pdf(
         self,
@@ -289,7 +300,7 @@ class ArtFinder:
         *,
         article: CrossrefArticle | Series | None = None,
         title: str | None = None,
-        issn: str | None = None,
+        issn: list[str] | None = None,
     ) -> pd.Series | None:
         """
         Get journal impact factor by its title or ISSN. Or get journal info from article.
@@ -313,4 +324,3 @@ class ArtFinder:
             issn = article.issn
         logger.info(f"Getting journal info for title: {title}, issn: {issn}")
         return SciMagoJR("latest").get_journal(title=title, issn=issn)
-

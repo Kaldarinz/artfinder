@@ -25,6 +25,7 @@ from pymupdf import Rect
 T = TypeVar("T", bound=Optional[str])
 P = ParamSpec("P")
 
+
 class LinePrinter:
     """
     A utility class for printing text on the same line in the terminal.
@@ -49,11 +50,18 @@ class LinePrinter:
     - In terminal environments, it uses ANSI escape codes to overwrite the current line.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = enabled
         if "ipykernel" in sys.modules:
             self.display_id = cast(DisplayHandle, display(display_id=True))
 
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable printing."""
+        self.enabled = enabled
+
     def __call__(self, text) -> None:
+        if not self.enabled:
+            return
         if "ipykernel" in sys.modules:
             self.display_id.update(text)
         else:
@@ -88,7 +96,7 @@ class MultiLinePrinter:
     lines : int
         The number of lines to manage.
     max_line_len : int
-        The maximum length of each line. 
+        The maximum length of each line.
         Used to truncate long lines in terminal environments.
 
     Attributes
@@ -113,7 +121,10 @@ class MultiLinePrinter:
     printer.close()
     """
 
-    def __init__(self, lines: int, max_line_len: int = 80) -> None:
+    def __init__(
+        self, lines: int, max_line_len: int = 80, enabled: bool = True
+    ) -> None:
+        self.enabled = enabled
         if "ipykernel" in sys.modules:
             display(clear=True)
             self.display_id = cast(DisplayHandle, display(display_id=True))
@@ -123,10 +134,22 @@ class MultiLinePrinter:
         self.max_line_len = max_line_len
         self.num_printed_lines = 0
 
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable printing."""
+        self.enabled = enabled
+
     def print(self) -> None:
+        if not self.enabled:
+            return
         if "ipykernel" in sys.modules:
             # IDK, this is the only way to make it work
-            self.display_id.update([self._format_line(self.lines[i]) for i in range(self._max_non_empty_index() + 1)], clear=True)
+            self.display_id.update(
+                [
+                    self._format_line(self.lines[i])
+                    for i in range(self._max_non_empty_index() + 1)
+                ],
+                clear=True,
+            )
 
         else:
             if not self.first_run:
@@ -145,8 +168,7 @@ class MultiLinePrinter:
             self.num_printed_lines = self._max_non_empty_index() + 1
             self.first_run = False
 
-
-    def _format_line(self, line: 'PrinterLine') -> str:
+    def _format_line(self, line: "PrinterLine") -> str:
         """
         Format the line text to fit within the maximum line length.
         """
@@ -164,6 +186,8 @@ class MultiLinePrinter:
         return -1
 
     def get_line(self) -> PrinterLine:
+        if not self.enabled:
+            return PrinterLine(-1, False, self)
         for line in self.lines:
             if not line.busy:
                 line.busy = True
@@ -237,17 +261,19 @@ def strict_filter(title: str) -> bool:
     pattern += r"".join(exlude_parts)
     return re.search(pattern, title, re.IGNORECASE) is not None
 
+
 ##########################
 ### ArticlePDF helpers ###
 ##########################
-    
+
+
 def rects_equal(rect1: Rect, rect2: Rect, threshold=1e-2) -> bool:
     """
     Compare two rects for equality within a given threshold.
 
     Parameters
     ----------
-    rect1, rect2 : rect-like 
+    rect1, rect2 : rect-like
         The rectangles to compare.
     threshold : float
         Maximum allowed difference for each coordinate.
@@ -277,3 +303,4 @@ def clip_to_grid(rect: Rect, digits=2) -> Rect:
         New rectangle with clipped coordinates.
     """
     return Rect([round(coord, digits) for coord in rect])
+

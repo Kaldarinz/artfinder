@@ -34,7 +34,7 @@ class SciMagoJR:
             )
 
     def get_journal(
-        self, title: str | None = None, issn: str | None = None
+        self, title: str | None = None, issn: list[str] | None = None
     ) -> pd.Series | None:
         """
         Get journal data for a given title or ISSN.
@@ -62,6 +62,8 @@ class SciMagoJR:
             if not journal_data.empty:
                 journal_data.loc[:, "title"] = title
         if journal_data.empty and not pd.isna(issn):  # type: ignore
+            # TODO: this is probably not correct, we need to check if any of the ISSNs match.
+            raise NotImplementedError("ISSN search is not implemented yet.")
             journal_data = self.all_data[self.all_data["Issn"] == issn]
         if journal_data.empty:
             logger.error("Journal not found in SciMagoJR data.")

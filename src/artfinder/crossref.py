@@ -43,10 +43,14 @@ class Endpoint(ABC):
         request_params: dict[str, Any] | None = None,
         endpoint: str | None = None,
         email: str | None = None,
+        print_status: bool = True,
         **kwargs,
     ):
-        self.printer = MultiLinePrinter(self.CONCURRENCY_LIMIT + 1)
-        self.status_line = LinePrinter()
+        self.print_status = print_status
+        self.printer = MultiLinePrinter(
+            self.CONCURRENCY_LIMIT + 1, enabled=print_status
+        )
+        self.status_line = LinePrinter(enabled=print_status)
         ahttpr = AsyncHTTPRequest(email=email, concurrency_limit=self.CONCURRENCY_LIMIT)
         self.async_get = ahttpr.async_get
         self.get = ahttpr.get
@@ -104,6 +108,7 @@ class Endpoint(ABC):
         result = self.get(
             url=self.request_url,
             params=self.request_params,
+            print_progress=self.print_status,
         )
 
         return result.get("message_version", "undefined")
@@ -218,7 +223,7 @@ class Endpoint(ABC):
                     items_obtained += increment
                     self.status_line(
                         f"Found {items_obtained} item{'s' if items_obtained > 1 else ''}."
-                         + f"{'Fetching more...' if increment == self.ROW_LIMIT else ''}"
+                        + f"{'Fetching more...' if increment == self.ROW_LIMIT else ''}"
                     )
                 for item in result["message"]["items"]:
                     yield item
@@ -336,6 +341,7 @@ class Crossref(Endpoint):
         self.status_line(f"Fetching {doi}...")
         result = self.get(
             url=build_cr_endpoint(resource=self.RESOURCE, endpoint=doi),
+            print_progress=self.print_status,
         )
         if result is None:
             self.status_line("Found nothing.")
@@ -351,7 +357,7 @@ class Crossref(Endpoint):
 
         # Get all articles from a list of DOIs
         urls = [build_cr_endpoint(resource=self.RESOURCE, endpoint=doi) for doi in dois]
-        results = self.async_get(urls)
+        results = self.async_get(urls, print_progress=self.print_status)
         return ArticleCollection(
             [
                 CrossrefArticle(result["message"])
