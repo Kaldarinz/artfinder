@@ -61,7 +61,7 @@ filterwarnings = [
   "ignore:.*SwigPy.*has no __module__ attribute:DeprecationWarning",
   "ignore:.*swigvarlink.*has no __module__ attribute:DeprecationWarning",
 ]
-  
+
 [tool.hatch.build.targets.wheel]
 artifacts = [
   "data/**",
