@@ -63,9 +63,7 @@ class SciMagoJR:
                 journal_data.loc[:, "title"] = title
         if journal_data.empty:
             for issn_ in issn:  # type: ignore
-                journal_data = self.all_data[
-                    self.all_data["Issn"].str.contains(issn_), :
-                ]
+                journal_data = self.all_data[self.all_data["Issn"].str.contains(issn_)]
                 if not journal_data.empty:
                     break
         if journal_data.empty:
