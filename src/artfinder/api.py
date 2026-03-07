@@ -322,5 +322,8 @@ class ArtFinder:
         if article is not None:
             title = article.journal
             issn = article.issn
+            # Special treatment of SPIE proceedings
+            if article.type == "proceedings-article" and article.publisher == "spie":
+                issn = ["0277786X", "1996756X"]
         logger.info(f"Getting journal info for title: {title}, issn: {issn}")
         return SciMagoJR("latest").get_journal(title=title, issn=issn)
