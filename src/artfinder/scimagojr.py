@@ -61,7 +61,7 @@ class SciMagoJR:
             ].copy()
             if not journal_data.empty:
                 journal_data.loc[:, "title"] = title
-        if journal_data.empty and not pd.isna(issn):  # type: ignore
+        if journal_data.empty:
             for issn_ in issn:  # type: ignore
                 journal_data = self.all_data[
                     self.all_data["Issn"].str.contains(issn_), :
