@@ -345,7 +345,15 @@ def _format_df(df: DataFrame) -> DataFrame:
     for col in ["title", "abstract", "publisher"]:
         df[col] = df[col].str.lower()
     # convert to python objects to python types
-    for col in ["license", "links", "authors", "references", "funders", "keywords"]:
+    for col in [
+        "license",
+        "links",
+        "authors",
+        "references",
+        "funders",
+        "keywords",
+        "issn",
+    ]:
         df[col] = (
             df[col].fillna("None").str.replace("none", "None").transform(literal_eval)
         )
