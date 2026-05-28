@@ -24,6 +24,7 @@ from artfinder.article import CrossrefArticle
 from artfinder.crossref import Crossref
 from artfinder.http_requests import FileDownloader
 from artfinder.scimagojr import SciMagoJR
+from artfinder.white_list import get_journal_info_sync
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 logger = logging.getLogger(__name__)
@@ -327,3 +328,36 @@ class ArtFinder:
                 issn = ["0277786X", "1996756X"]
         logger.info(f"Getting journal info for title: {title}, issn: {issn}")
         return SciMagoJR("latest").get_journal(title=title, issn=issn)
+
+    def get_white_list_data(
+        self,
+        *,
+        article: CrossrefArticle | Series | None = None,
+        title: str | None = None,
+        issn: list[str] | None = None,
+    ) -> dict | None:
+        """
+        Get journal impact factor by its title or ISSN. Or get journal info from article.
+
+        Parameters
+        ----------
+        article : CrossrefArticle | None
+            Article to get journal info for. If provided, title and issn are ignored.
+        title : str | None
+            Title of the journal.
+        issn : str | None
+            ISSN of the journal.
+
+        Returns
+        -------
+        Impact factor of the journal or None if not found.
+        """
+
+        if article is not None:
+            title = article.journal
+            issn = article.issn
+            # Special treatment of SPIE proceedings
+            if article.type == "proceedings-article" and article.publisher == "spie":
+                issn = ["0277786X", "1996756X"]
+        logger.info(f"Getting journal info for title: {title}, issn: {issn}")
+        return get_journal_info_sync(title=title, issn=issn)
