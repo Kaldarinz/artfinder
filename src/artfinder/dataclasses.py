@@ -648,7 +648,7 @@ class Size:
 class FigureCaptionPDF:
     matched_pattern: str
     text: str
-    font_props: int
+    font_props: tuple[int, int, str]
     lines_no: int
     rect: Rect
 

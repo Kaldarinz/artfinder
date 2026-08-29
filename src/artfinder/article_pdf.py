@@ -6,39 +6,36 @@ extracting figures, captions, and analyzing document structure.
 """
 
 import re
-from collections import namedtuple, Counter
-from dataclasses import dataclass, field
-from copy import deepcopy, copy
-from functools import cached_property, lru_cache
+from collections import Counter
+from collections.abc import Iterable
+from copy import copy, deepcopy
+from functools import cached_property
 from itertools import chain
 from math import floor
-import os
 from os import PathLike
 from pathlib import Path
-from typing import Optional, cast, Any, List, Sequence, Union, Mapping, Iterable
-from pprint import pprint
+from typing import cast
 from warnings import warn
 
 import pandas as pd
 import pymupdf
-from pymupdf import Document, Page, Rect, Matrix, Pixmap, Shape
-from sklearn.cluster import DBSCAN
+from pymupdf import Page, Pixmap, Rect
+from sklearn.cluster import DBSCAN  # type: ignore[import-untyped]
 
 from artfinder.dataclasses import (
-    Color,
+    DocumentElementsPDF,
     DrawingObjectPDF,
+    FigureCaptionPDF,
+    FigurePDF,
     ImageInfoPDF,
-    TextBlockPDF,
     KeyedDict,
     Size,
-    FigureCaptionPDF,
-    DocumentElementsPDF,
-    FigurePDF,
+    TextBlockPDF,
 )
 from artfinder.helpers import (
     clip_to_grid,
-    rects_equal
 )
+
 
 class ArticlePDF:
     """
@@ -54,8 +51,6 @@ class ArticlePDF:
     "Factor to adjust column fitting when estimating number of columns."
     HEADER_MAX_FRACTION = 0.09
     "Maximum fraction of page height to consider for header detection."
-    RECTS_EQUAL_THR = 0.1
-    "Coordinate threshold for considering two rectangles equal."
     RECTS_CLIP_PRECISION = 0
     "Precidion digits for clipping rects coordinates."
     MAX_IMAGE_AREA = 0.8
@@ -69,8 +64,11 @@ class ArticlePDF:
 
         Parameters
         ----------
-        pdf_path : PathLike | str
-            Path to the PDF file to analyze.
+        pdf : PathLike | str | bytes
+            Path to the PDF file to analyze, or its raw bytes.
+        identifier : str, optional
+            Identifier for the article. If empty, falls back to the filename,
+            then the DOI, then the first 50 characters of the first page's text.
 
         Raises
         ------
@@ -100,22 +98,25 @@ class ArticlePDF:
         self.identifier = identifier
         if isinstance(pdf, (PathLike, str)):
             self.path = Path(pdf)
-            self.identifier = self.path.name
             if not self.path.exists():
                 raise FileNotFoundError(f"PDF file not found: {pdf}")
+            if len(self.identifier) == 0:
+                self.identifier = self.path.name
         try:
             if hasattr(self, "path"):
                 self.file = pymupdf.open(str(self.path))
             else:
                 self.file = pymupdf.open(stream=pdf, filetype="pdf")
-        except Exception as e:
+        except (
+            Exception
+        ) as e:  # noqa: BLE001 - pymupdf raises varied types for a bad file
             raise ValueError(f"Failed to open PDF file: {e}")
 
         if len(self.identifier) == 0:
             if self.doi is not None:
                 self.identifier = self.make_valid_filename(self.doi)
             else:
-                self.identifier = self.make_valid_filename(self.file[0].get_text()[:50]) # type: ignore
+                self.identifier = self.make_valid_filename(self.file[0].get_text()[:50])  # type: ignore
 
     def __enter__(self):
         """Context manager entry."""
@@ -127,7 +128,7 @@ class ArticlePDF:
 
     def close(self):
         """Close the PDF document."""
-        if hasattr(self, "pdf") and self.file:
+        if hasattr(self, "file"):
             self.file.close()
 
     def __repr__(self):
@@ -150,7 +151,7 @@ class ArticlePDF:
         """
 
         # Replace invalid characters with underscores
-        valid_name = re.sub(r'[<>:"/\\|?*\n\r\t]', '_', name)
+        valid_name = re.sub(r'[<>:"/\\|?*\n\r\t]', "_", name)
         # Truncate to a reasonable length
         return valid_name[:255]
 
@@ -175,8 +176,8 @@ class ArticlePDF:
 
         Returns
         -------
-        Width
-            Named tuple with mean, min, max of paragraph widths.
+        Size
+            Mean, min, max of paragraph widths.
         """
 
         return self._calc_paragraph_width()
@@ -186,12 +187,17 @@ class ArticlePDF:
         """
         Number of columns in the document.
 
+        Raises
+        ------
+        ValueError
+            If the document has no pages with a valid width.
+
         Returns
         -------
         int
             The estimated number of columns (1, 2, etc.).
         """
-        all_widths = [page.rect.width for page in self.file]
+        all_widths = [self.file[i].rect.width for i in range(self.file.page_count)]
         if len(all_widths):
             page_width = sum(all_widths) / len(all_widths)
         else:
@@ -207,8 +213,9 @@ class ArticlePDF:
 
         Returns
         -------
-        Rect | None
-            The header rectangle if found, otherwise None.
+        Rect
+            The header rectangle if found, otherwise an empty Rect (with a
+            warning issued).
         """
 
         # We assume that all pages in the pdf file have the same size
@@ -217,7 +224,7 @@ class ArticlePDF:
         search_height = search_rect.height * self.HEADER_MAX_FRACTION
         search_rect.y1 = search_height
 
-        cnt = Counter()
+        cnt: Counter[Rect] = Counter()
         header_found = False
         clip_precision = self.RECTS_CLIP_PRECISION
         while not header_found:
@@ -248,8 +255,8 @@ class ArticlePDF:
                     self._header_rect = Rect()
                     return self._header_rect
         # Use only 3 most popular values for rect counts
-        most_common_cnts = sorted(most_common_cnts, reverse=True)[:1]
-        most_common_rects = {k: v for k, v in cnt.items() if v in most_common_cnts}
+        top_cnts = sorted(most_common_cnts, reverse=True)[:1]
+        most_common_rects = {k: v for k, v in cnt.items() if v in top_cnts}
         lowest_bound = max(most_common_rects.keys(), key=lambda x: x.y1).y1
         search_rect.y1 = lowest_bound
         return search_rect
@@ -307,6 +314,7 @@ class ArticlePDF:
             page_no = cast(int, page_no.number)
 
         result: list[Rect] = []
+        blocks: Iterable[TextBlockPDF]
         if page_no is None:
             blocks = chain.from_iterable(
                 [self._text_cache[i] for i in range(self.file.page_count)]
@@ -314,12 +322,13 @@ class ArticlePDF:
         else:
             blocks = self._text_cache[page_no]
         for block in blocks:
-            if clip is None or clip.contains(block.rect):
-                if min_len is None or len(block.text.strip()) >= min_len:
-                    if copy_rects:
-                        result.append(copy(block.rect))
-                    else:
-                        result.append(block.rect)
+            if (clip is None or clip.contains(block.rect)) and (
+                min_len is None or len(block.text.strip()) >= min_len
+            ):
+                if copy_rects:
+                    result.append(copy(block.rect))
+                else:
+                    result.append(block.rect)
         return result
 
     def get_drawing_rects(
@@ -470,18 +479,19 @@ class ArticlePDF:
             Page number (0-indexed). If None, return figures for all document
         clip : Rect | None, optional
             Rectangle to clip the figure blocks.
-        copy_rects : bool, default=True
-            Whether to return copies of the rectangles or references.
+        copy_figures : bool, default=False
+            Whether to return copies of the figures or references.
 
         Returns
         -------
-        dict[int, Figure]
+        dict[int, FigurePDF]
             Dictionary of figures keyed by figure number.
         """
 
         if isinstance(page_no, Page):
             page_no = cast(int, page_no.number)
 
+        pages: Iterable[int]
         if page_no is None:
             pages = range(self.file.page_count)
         else:
@@ -535,15 +545,18 @@ class ArticlePDF:
 
         Returns
         -------
-        list[DrawingObject]
+        list[DrawingObjectPDF]
             List of drawing objects for the specified figure(s).
         """
 
-        return self._get_figure_component_by_type(
-            figure_no=figure_no,
-            page_index=page_index,
-            component_type="drawings",
-            copy_objects=copy_objects
+        return cast(
+            "list[DrawingObjectPDF]",
+            self._get_figure_component_by_type(
+                figure_no=figure_no,
+                page_index=page_index,
+                component_type="drawings",
+                copy_objects=copy_objects,
+            ),
         )
 
     def get_figure_images(
@@ -562,19 +575,22 @@ class ArticlePDF:
         page_index : int | None, optional
             Page index to get figures from. If None, get all figures specified by figure_no.
         copy_objects : bool, default=False
-            Whether to return copies of the drawing objects or references.
+            Whether to return copies of the image objects or references.
 
         Returns
         -------
-        list[DrawingObject]
-            List of drawing objects for the specified figure(s).
+        list[ImageInfoPDF]
+            List of image objects for the specified figure(s).
         """
 
-        return self._get_figure_component_by_type(
-            figure_no=figure_no,
-            page_index=page_index,
-            component_type="images",
-            copy_objects=copy_objects
+        return cast(
+            "list[ImageInfoPDF]",
+            self._get_figure_component_by_type(
+                figure_no=figure_no,
+                page_index=page_index,
+                component_type="images",
+                copy_objects=copy_objects,
+            ),
         )
 
     def get_figure_texts(
@@ -589,23 +605,26 @@ class ArticlePDF:
         Parameters
         ----------
         figure_no : int | None, optional
-            Figure number to get drawings for. If None, gets drawings for all figures.
+            Figure number to get text for. If None, gets text for all figures.
         page_index : int | None, optional
             Page index to get figures from. If None, get all figures specified by figure_no.
         copy_objects : bool, default=False
-            Whether to return copies of the drawing objects or references.
+            Whether to return copies of the text blocks or references.
 
         Returns
         -------
-        list[TextBlock]
+        list[TextBlockPDF]
             List of text blocks for the specified figure(s).
         """
 
-        return self._get_figure_component_by_type(
-            figure_no=figure_no,
-            page_index=page_index,
-            component_type="text",
-            copy_objects=copy_objects
+        return cast(
+            "list[TextBlockPDF]",
+            self._get_figure_component_by_type(
+                figure_no=figure_no,
+                page_index=page_index,
+                component_type="text",
+                copy_objects=copy_objects,
+            ),
         )
 
     def _get_doi(self) -> str | None:
@@ -617,35 +636,33 @@ class ArticlePDF:
 
         Returns
         -------
-        str
-            DOI string if found, otherwise empty string.
+        str | None
+            DOI string if found, otherwise None.
         """
 
         # Try to get DOI from PDF metadata
         metadata = cast(dict[str, str], self.file.metadata)
-        if (subj:=metadata.get("subject")):
+        if subj := metadata.get("subject"):
             doi = self.extract_doi_from_text(subj)
             if doi:
                 return doi
 
-        for page in self.file:
-            page_text = page.get_text()
+        for page_no in range(self.file.page_count):
+            page_text = self.file[page_no].get_text()
             if isinstance(page_text, str):
                 doi = self.extract_doi_from_text(page_text)
                 if doi is not None:
                     return doi
         warn(f"DOI not found in metadata or text of {self}.")
         return None
-        
+
     @classmethod
     def extract_doi_from_text(cls, text: str) -> str | None:
 
         # Search for DOI pattern in the text
         doi_pattern = re.compile(r"10.\d{4,9}/[-._;()/:A-Z0-9]+(?<!\.)", re.IGNORECASE)
-        found_doi = doi_pattern.search(text)
-        if found_doi is not None:
-            found_doi = found_doi.group().lower()
-        return found_doi
+        match = doi_pattern.search(text)
+        return match.group().lower() if match is not None else None
 
     def extract_figure_drawings(
         self,
@@ -804,7 +821,9 @@ class ArticlePDF:
             figure_images = self.get_figure_images(fig_no)
             if figure_images:
                 figure_image_page = self._make_image(figure_images)
-                pixmap = figure_image_page.get_pixmap(dpi=dpi, clip=figures[fig_no].rect)
+                pixmap = figure_image_page.get_pixmap(
+                    dpi=dpi, clip=figures[fig_no].rect
+                )
 
                 path = output_path / Path(f"{self.identifier}_fig_{fig_no}_image.png")
                 pixmap.save(path, output="PNG")
@@ -867,19 +886,19 @@ class ArticlePDF:
                     figure_no=fig_no,
                     page_index=page_ind,
                     output_path=output_path,
-                    dpi=dpi
+                    dpi=dpi,
                 )
                 self.extract_figure_images(
                     figure_no=fig_no,
                     page_index=page_ind,
                     output_path=output_path,
-                    dpi=dpi
+                    dpi=dpi,
                 )
                 self.extract_figure_text(
                     figure_no=fig_no,
                     page_index=page_ind,
                     output_path=output_path,
-                    dpi=dpi
+                    dpi=dpi,
                 )
 
         return paths
@@ -888,7 +907,7 @@ class ArticlePDF:
         self,
         elements: list[str] | str | None,
         page_number: int | None = None,
-        output_path: Optional[PathLike | str] = None,
+        output_path: PathLike | str | None = None,
         stroke_color: tuple[float, ...] = (1.0, 0.0, 0.0),
         stroke_width: float = 2.0,
     ) -> str:
@@ -942,7 +961,10 @@ class ArticlePDF:
                     rects.extend(self.get_drawing_rects(page.number, copy_rects=False))
                 if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.IMAGE]:
                     rects.extend(self.get_image_rects(page.number, copy_rects=False))
-                if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.FIGURE_CAPTION]:
+                if element in [
+                    DocumentElementsPDF.ALL,
+                    DocumentElementsPDF.FIGURE_CAPTION,
+                ]:
                     rects.extend(
                         self.get_figure_caption_rects(page.number, copy_rects=False)
                     )
@@ -970,7 +992,7 @@ class ArticlePDF:
             output_path = output_path / Path(
                 f"{file_id}_{'_'.join([element for element in elements])}.pdf"
             )
-        
+
         self.file.save(str(output_path))
         return str(output_path)
 
@@ -1010,7 +1032,7 @@ class ArticlePDF:
         figure_no: int | None = None,
         page_index: int | None = None,
         copy_objects: bool = False,
-    ) -> list:
+    ) -> list[DrawingObjectPDF | ImageInfoPDF | TextBlockPDF]:
         """
         Internal method to get figure components (images, drawings, texts).
         """
@@ -1023,17 +1045,15 @@ class ArticlePDF:
             warn("No figures found to extract.")
             return []
 
-        components = []
+        components: list[DrawingObjectPDF | ImageInfoPDF | TextBlockPDF] = []
         for fig_no in figures:
             page_ind = self._figure_no_to_page_ind[fig_no]
             page_components = getattr(self, f"_{component_type}_cache")[page_ind]
 
             components.extend(
-                (
-                    deepcopy(component) if copy_objects else component
-                    for component in page_components
-                    if figures[fig_no].rect.contains(component.rect)
-                )
+                deepcopy(component) if copy_objects else component
+                for component in page_components
+                if figures[fig_no].rect.contains(component.rect)
             )
         return components
 
@@ -1045,13 +1065,18 @@ class ArticlePDF:
         ----------
         page_no : int
             Page number (0-indexed).
+
+        Returns
+        -------
+        tuple[TextBlockPDF, ...]
+            Non-blank text blocks on the page.
         """
 
         result: list[TextBlockPDF] = []
         text_blocks = [
-            TextBlockPDF.from_dict(block) # type: ignore
+            TextBlockPDF.from_dict(block)  # type: ignore
             for block in self.file[page_no].get_text(option="dict")["blocks"]  # type: ignore
-            if block["type"] == 0 # type: ignore
+            if block["type"] == 0  # type: ignore
         ]
         for block in text_blocks:
             # Skip blank blocks
@@ -1068,6 +1093,11 @@ class ArticlePDF:
         ----------
         page_no : int
             Page number (0-indexed).
+
+        Returns
+        -------
+        tuple[DrawingObjectPDF, ...]
+            Drawing objects on the page.
         """
 
         page = self.file[page_no]
@@ -1087,6 +1117,12 @@ class ArticlePDF:
         ----------
         page_no : int
             Page number (0-indexed).
+
+        Returns
+        -------
+        tuple[ImageInfoPDF, ...]
+            Image info for images on the page, excluding oversized ones (see
+            `MAX_IMAGE_AREA`).
         """
 
         page = self.file[page_no]
@@ -1105,11 +1141,9 @@ class ArticlePDF:
         if page_size_images:
             warn("Too large images detected. Figure extraction unreliable")
         return tuple(
-            (
-                image
-                for image in all_images
-                if abs(image.rect) < page_area * self.MAX_IMAGE_AREA
-            )
+            image
+            for image in all_images
+            if abs(image.rect) < page_area * self.MAX_IMAGE_AREA
         )
 
     def _make_drawings(
@@ -1120,10 +1154,15 @@ class ArticlePDF:
 
         Parameters
         ----------
-        drawings : Iterable[DrawingObject]
+        drawings : Iterable[DrawingObjectPDF]
             Drawing objects to render.
         page : Page | None
             Page to render drawings on. If None, creates a new blank page.
+
+        Raises
+        ------
+        ValueError
+            If a drawing contains an unknown drawing item type.
 
         Returns
         -------
@@ -1161,8 +1200,8 @@ class ArticlePDF:
 
         Parameters
         ----------
-        text_kwargs : Iterable[dict]
-            Text objects to render.
+        text_blocks : Iterable[TextBlockPDF]
+            Text blocks to render.
         page : Page | None
             Page to render text on. If None, creates a new blank page.
 
@@ -1186,13 +1225,13 @@ class ArticlePDF:
 
     def _make_image(
         self, images: Iterable[ImageInfoPDF], page: Page | None = None
-        ) -> Page:
+    ) -> Page:
         """
         Internal method to render image objects.
 
         Parameters
         ----------
-        images : Iterable[PdfImageInfo]
+        images : Iterable[ImageInfoPDF]
             Image objects to render.
         page : Page | None
             Page to render images on. If None, creates a new blank page.
@@ -1225,6 +1264,11 @@ class ArticlePDF:
         eps : float
             The maximum distance between two samples for one to be considered as
             in the neighborhood of the other.
+
+        Returns
+        -------
+        Size
+            Mean, min, max width of the largest paragraph-width cluster.
         """
 
         text_blocks = pd.DataFrame(
@@ -1258,7 +1302,7 @@ class ArticlePDF:
 
         def _find_figure_captions_in_page(
             page: Page,
-        ) -> dict[int, tuple[FigureCaptionPDF]]:
+        ) -> dict[int, tuple[FigureCaptionPDF, ...]]:
             # Pattern: optional whitespace, 'Fig', optional '.' or 'ure' or 'ure.',
             # whitespace, digits, optional trailing '.'
             pattern = r"^\s*Fig(?:\.|ure\.?|)\s+\d+\W*"
@@ -1278,7 +1322,7 @@ class ArticlePDF:
                     font_props = (
                         block.lines[0].spans[0].char_flags,
                         block.lines[0].spans[0].flags,
-                        block.lines[0].spans[0].font
+                        block.lines[0].spans[0].font,
                     )
 
                     # I have encountered three possible cases:
@@ -1309,7 +1353,11 @@ class ArticlePDF:
                         for j in range(len(next_block.lines)):
                             next_line = next_block.lines[j]
                             if (
-                                abs(next_line.rect.y1 - block.lines[-1].rect.y1 - block.lines[-1].rect.height)
+                                abs(
+                                    next_line.rect.y1
+                                    - block.lines[-1].rect.y1
+                                    - block.lines[-1].rect.height
+                                )
                                 < vertical_thr
                             ):
                                 block = block + next_line
@@ -1319,7 +1367,7 @@ class ArticlePDF:
                                 break
                         # Full block was consumed, check the next block
                         if lines_consumed == len(next_block.lines):
-                            i += 1 
+                            i += 1
                             continue
                         # If we did not extend caption, do not consume next block
                         if not capture_extended:
@@ -1329,31 +1377,27 @@ class ArticlePDF:
                     text = block.text.replace(pattern_text, "").strip()
                     fig_captures.append(
                         FigureCaptionPDF(
-                            **{
-                                "matched_pattern": pattern_text,
-                                "font_props": font_props,
-                                "text": text,
-                                "lines_no": len(block.lines),
-                                "rect": copy(block.rect),
-                            }
+                            matched_pattern=pattern_text,
+                            font_props=font_props,
+                            text=text,
+                            lines_no=len(block.lines),
+                            rect=copy(block.rect),
                         )
                     )
                 i += 1
             return {page.number: tuple(fig_captures)}  # type: ignore
 
-        captions: dict[int, tuple[FigureCaptionPDF]] = {}
-        for page in self.file:
-            captions.update(_find_figure_captions_in_page(page))
+        captions: dict[int, tuple[FigureCaptionPDF, ...]] = {}
+        for page_no in range(self.file.page_count):
+            captions.update(_find_figure_captions_in_page(self.file[page_no]))
         # Some text paragraphs can start the same way as figure caption.
         # Text paragraph usually have their font_flag different from font_flag
         # of matched_pattern in real figure caption.
         # Therefore we only use found FigureCaption with the most common font_flag
         most_common_flags = Counter(
-            (
-                caption.font_props
-                for page_captions in captions.values()
-                for caption in page_captions
-            )
+            caption.font_props
+            for page_captions in captions.values()
+            for caption in page_captions
         ).most_common(1)
         if not most_common_flags:
             return captions
@@ -1373,12 +1417,13 @@ class ArticlePDF:
     def _is_side_caption(self, page_no: int, caption_rect: Rect) -> bool:
 
         page_captions = self._figure_captions_cache[page_no]
-        page_caption = [
+        page_caption = next(
             caption for caption in page_captions if caption.rect == caption_rect
-        ][0]
-        if caption_rect.width < self.paragraph_width.mean / 2 and page_caption.lines_no > 1:
-            return True
-        return False
+        )
+        return (
+            caption_rect.width < self.paragraph_width.mean / 2
+            and page_caption.lines_no > 1
+        )
 
     def _get_figures_from_page(
         self,
@@ -1460,23 +1505,29 @@ class ArticlePDF:
                 upper_bound_candidates.append(lowest_paragraph)
 
             # Search for figure caption above
-            figure_captions = self.get_figure_caption_rects(page_no, clip=figure_rect)
+            other_caption_rects = self.get_figure_caption_rects(
+                page_no, clip=figure_rect
+            )
             if self.columns_number > 1:
                 # If figure is in right column, then we don't care
                 # about other figures in left column
                 if caption.rect.x0 > min_x0_right_col:
-                    figure_captions = [
-                        rect for rect in figure_captions if rect.x0 > min_x0_right_col
+                    other_caption_rects = [
+                        rect
+                        for rect in other_caption_rects
+                        if rect.x0 > min_x0_right_col
                     ]
                 # Figure is in left column, then we don't care
                 # about other figures
                 elif caption.rect.x1 < max_x1_left_col:
-                    figure_captions = [
-                        rect for rect in figure_captions if rect.x1 < max_x1_left_col
+                    other_caption_rects = [
+                        rect
+                        for rect in other_caption_rects
+                        if rect.x1 < max_x1_left_col
                     ]
 
-            if figure_captions:
-                lowest_caption = max(figure_captions, key=lambda x: x.y1)
+            if other_caption_rects:
+                lowest_caption = max(other_caption_rects, key=lambda x: x.y1)
                 upper_bound_candidates.append(lowest_caption)
 
             upper_bound_candidates.append(self.header_rect)
@@ -1628,17 +1679,3 @@ class ArticlePDF:
                 )
 
         return figure_rect
-
-    def _extract_figure_no(self, figure: FigurePDF) -> int:
-
-        match = re.search(r"\d+", figure.caption.matched_pattern)
-        if match is None:
-            warn(
-                "Could not extract figure number from caption pattern "
-                + f"'{figure.caption.matched_pattern}' in {self}"
-            )
-            return 0
-        return int(match.group())
-
-
-
