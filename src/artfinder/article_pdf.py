@@ -31,6 +31,7 @@ from artfinder.dataclasses import (
     KeyedDict,
     Size,
     TextBlockPDF,
+    TextLinePDF,
 )
 from artfinder.helpers import (
     clip_to_grid,
@@ -1297,6 +1298,170 @@ class ArticlePDF:
         width_max = largest_cluster[("width", "max")]
         return Size(mean=width_mean, min=width_min, max=width_max)  # type: ignore
 
+    @staticmethod
+    def _normalize_caption_whitespace(text: str) -> str:
+        """
+        Collapse whitespace runs and fix spacing around punctuation.
+
+        Depending on the installed pymupdf version, a text line can be split
+        into many single-word spans plus dedicated whitespace-only spans
+        instead of fewer, coarser spans with whitespace embedded in their
+        text. A naive per-span join then inserts extra spaces at those
+        boundaries, producing double/triple spaces and stray spaces before
+        punctuation or after an opening parenthesis. This is used only when
+        assembling figure caption text.
+
+        Parameters
+        ----------
+        text : str
+            Text to normalize.
+
+        Returns
+        -------
+        str
+            Normalized text.
+        """
+
+        # Collapse any run of whitespace (space, tab, thin space, nbsp, ...) to one space.
+        text = re.sub(r"\s+", " ", text)
+        # Drop the space before a closing punctuation mark, e.g. "word ." -> "word.".
+        text = re.sub(r"\s+([.,;:!?)])", r"\1", text)
+        # Drop the space right after an opening parenthesis, e.g. "( word" -> "(word".
+        text = re.sub(r"([(])\s+", r"\1", text)
+        return text.strip()
+
+    @classmethod
+    def _caption_line_text(cls, line: TextLinePDF) -> str:
+        """
+        Assemble a single line's text from its spans for figure captions.
+
+        A soft hyphen (U+00AD) marks an optional break point and is never
+        real content. One in the middle of the line never took effect and
+        is dropped outright; one at the very end reflects an actual
+        line-wrap and is kept as a single trailing marker for
+        `_join_caption_lines` to resolve, the same way a plain "-" is.
+
+        Parameters
+        ----------
+        line : TextLinePDF
+            Line to assemble text from.
+
+        Returns
+        -------
+        str
+            Normalized line text (see `_normalize_caption_whitespace`).
+        """
+
+        raw = " ".join(span.text for span in line.spans)
+        text = cls._normalize_caption_whitespace(raw)
+        ends_with_soft_hyphen = text.endswith("\xad")
+        text = text.replace("\xad", "").rstrip()
+        if ends_with_soft_hyphen:
+            text += "\xad"
+        return text
+
+    @cached_property
+    def _compound_hyphen_pairs(self) -> frozenset[tuple[str, str]]:
+        """
+        Word pairs confirmed to be genuine hyphenated compounds.
+
+        Built by scanning every line of the document for hyphen-joined word
+        chains (e.g. "Si-NPs") that occur away from the end of a physical
+        PDF line. If a pair only ever appears where its hyphen coincides
+        with a line end, it is more likely a line-wrap artifact than a real
+        compound, so it is excluded here; `_join_caption_lines` then merges
+        it (dropping the hyphen) instead of keeping it when assembling
+        figure captions.
+
+        Returns
+        -------
+        frozenset[tuple[str, str]]
+            Lowercased (word1, word2) pairs confirmed to appear hyphenated
+            somewhere other than a line-wrap point.
+        """
+
+        # Matches a hyphen-joined chain of word characters, e.g. "Si-NPs" or
+        # "DARPin_9-29-tagRFP" (each dash-separated segment on its own).
+        token_pattern = re.compile(r"[^\W_]+(?:-[^\W_]+)*")
+        pairs: set[tuple[str, str]] = set()
+        for page_no in range(self.file.page_count):
+            for block in self._text_cache[page_no]:
+                for line in block.lines:
+                    text = self._caption_line_text(line)
+                    stripped = text.rstrip()
+                    for tok_match in token_pattern.finditer(text):
+                        token = tok_match.group(0)
+                        if "-" not in token:
+                            continue
+                        is_line_final_token = (
+                            tok_match.end() == len(stripped) and stripped.endswith("-")
+                        )
+                        parts = token.split("-")
+                        for i in range(len(parts) - 1):
+                            is_last_pair = i == len(parts) - 2
+                            if is_last_pair and is_line_final_token:
+                                continue
+                            pairs.add((parts[i].lower(), parts[i + 1].lower()))
+        return frozenset(pairs)
+
+    def _join_caption_lines(self, lines: Iterable[TextLinePDF]) -> str:
+        """
+        Join a figure caption's lines into clean text.
+
+        Mirrors the usual per-line join, but additionally collapses
+        whitespace artifacts introduced by span-splitting (see
+        `_caption_line_text`) and resolves hyphens at line-wrap boundaries.
+        A soft hyphen (U+00AD) is always dropped, since it never carries
+        content. A plain "-" is resolved using `_compound_hyphen_pairs`:
+        dropped when it looks like a wrapped word (e.g. "nanopar-" /
+        "ticles" -> "nanoparticles") and kept when the pair is a confirmed
+        compound elsewhere in the document (e.g. "Si-" / "NPs" -> "Si-NPs").
+
+        Parameters
+        ----------
+        lines : Iterable[TextLinePDF]
+            Lines to join, in reading order.
+
+        Returns
+        -------
+        str
+            Assembled caption text.
+        """
+
+        # Matches the last run of word characters in a string, e.g. the "NPs"
+        # in "...Si-NPs" -- used to get the word right before a line-final hyphen.
+        word_end_pattern = re.compile(r"[^\W_]+$")
+        # Matches the first run of word characters in a string, e.g. the
+        # "ticles" in "ticles from..." -- the word right after the line break.
+        word_start_pattern = re.compile(r"[^\W_]+")
+        compound_pairs = self._compound_hyphen_pairs
+
+        result = ""
+        for line in lines:
+            text = self._caption_line_text(line)
+            if not text:
+                continue
+            if not result:
+                result = text
+                continue
+            if result.endswith("\xad"):
+                result = result[:-1] + text
+            elif result.endswith("-"):
+                w1_match = word_end_pattern.search(result[:-1])
+                w2_match = word_start_pattern.match(text)
+                keep_hyphen = (
+                    w1_match is not None
+                    and w2_match is not None
+                    and (w1_match.group(0).lower(), w2_match.group(0).lower())
+                    in compound_pairs
+                )
+                if not keep_hyphen:
+                    result = result[:-1]
+                result += text
+            else:
+                result += " " + text
+        return result
+
     def _find_figure_captions(self) -> dict[int, tuple[FigureCaptionPDF, ...]]:
         """Internal method to find figure captions on page."""
 
@@ -1373,8 +1538,15 @@ class ArticlePDF:
                         if not capture_extended:
                             i -= 1
                         break
-                    # remove matched pattern and extra blank lines from text
-                    text = block.text.replace(pattern_text, "").strip()
+                    # Assemble clean caption text (whitespace-normalized,
+                    # line-wrap hyphens resolved) and remove the matched pattern.
+                    clean_text = self._join_caption_lines(block.lines)
+                    clean_match = re.match(pattern, clean_text, re.IGNORECASE)
+                    text = (
+                        clean_text[clean_match.end() :].strip()
+                        if clean_match is not None
+                        else clean_text.replace(pattern_text, "").strip()
+                    )
                     fig_captures.append(
                         FigureCaptionPDF(
                             matched_pattern=pattern_text,
