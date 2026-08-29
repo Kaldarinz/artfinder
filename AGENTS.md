@@ -10,7 +10,7 @@ Packaging: hatchling, `src/` layout, `requires-python >= 3.10`. Version lives in
 
 ## Environment & commands
 
-`venv/` at the repo root is the working environment (Python 3.12) with `artfinder` installed editable. **Neither `pytest` nor `hatch` is installed there** — install before running tests or type checks:
+`venv/` at the repo root is the working environment (Python 3.12) with `artfinder` installed editable **from the main checkout**. **Neither `pytest` nor `hatch` is installed there** — install before running tests or type checks:
 
 ```bash
 venv/bin/pip install pytest
@@ -36,7 +36,9 @@ hatch run types:check
 venv/bin/mypy src/artfinder tests
 ```
 
-Before completing a change, type-check every edited Python file and resolve reported errors.
+Before completing a change, type-check every edited Python file and resolve reported errors. The type check is *not* clean — see the baseline in `docs/test_setup.md` and make sure your change does not raise the total.
+
+**Working in a `git worktree`?** The venv's editable install points at the main checkout, so a careless invocation checks the wrong source tree and your edits look like no-ops. Tests are already handled (`pythonpath = ["src"]` in `pyproject.toml`), but single-file `mypy` runs are not. Read [docs/test_setup.md](docs/test_setup.md) before running anything from a worktree.
 
 `tst.py` is a scratch script (gitignored via `tst*`) — safe to overwrite for quick manual checks.
 

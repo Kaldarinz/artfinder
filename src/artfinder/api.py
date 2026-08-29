@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import warnings
 import logging
+from collections.abc import Iterable
 from typing import (
     ParamSpec,
     TypeVar,
@@ -31,6 +32,55 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 P = ParamSpec("P")
+
+
+def _clean_str(value: object) -> str | None:
+    """
+    Normalize a string field coming out of a DataFrame or Series.
+
+    Pandas represents an absent value as `pd.NA` or `NaN` rather than None. Such a
+    value is not merely unusable for string handling: `pd.NA == "x"` is itself `pd.NA`,
+    so comparing it inside a boolean expression raises.
+
+    Parameters
+    ----------
+    value : object
+        Raw field value.
+
+    Returns
+    -------
+    str | None
+        Stripped string, or None if it is missing or blank.
+    """
+
+    # None, pd.NA and NaN are all caught by the isinstance check.
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
+def _clean_issn(value: object) -> list[str] | None:
+    """
+    Normalize an ISSN collection coming out of a DataFrame or Series.
+
+    Parameters
+    ----------
+    value : object
+        Raw ISSN value: a list of ISSNs, a missing value, or a bare string.
+
+    Returns
+    -------
+    list[str] | None
+        Non-empty ISSNs, or None if none are usable.
+    """
+
+    if isinstance(value, str):
+        value = [value]
+    # None, pd.NA and NaN are all non-iterable, and so are caught here.
+    if not isinstance(value, Iterable):
+        return None
+    issns = [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    return issns or None
 
 
 class ArtFinder:
@@ -80,7 +130,8 @@ class ArtFinder:
 
         Returns
         -------
-        Series containing the article information.
+        Series containing the article information. An empty Series if the article
+        was not found.
         """
 
         if doi is None and title is None:
@@ -97,7 +148,16 @@ class ArtFinder:
             )
         else:
             df = Crossref(email=self.email, print_status=self.print_status).doi(doi)  # type: ignore
-        return pd.Series(df.iloc[0]) if not df.empty else pd.Series(index=df.columns)
+        if df.empty:
+            # An all-missing Series over df.columns would look like a real article to
+            # callers, so return something plainly empty instead.
+            warnings.warn(
+                f"No article found for {'doi' if doi is not None else 'title'} "
+                f"{doi if doi is not None else title!r}.",
+                stacklevel=2,
+            )
+            return pd.Series(dtype=object)
+        return pd.Series(df.iloc[0])
 
     def search(
         self,
@@ -321,11 +381,17 @@ class ArtFinder:
         """
 
         if article is not None:
-            title = article.journal
-            issn = article.issn
+            title = _clean_str(article.journal)
+            issn = _clean_issn(article.issn)
             # Special treatment of SPIE proceedings
-            if article.type == "proceedings-article" and article.publisher == "spie":
+            if (
+                _clean_str(article.type) == "proceedings-article"
+                and _clean_str(article.publisher) == "spie"
+            ):
                 issn = ["0277786X", "1996756X"]
+        if title is None and issn is None:
+            logger.warning("No journal title or ISSN available, skipping journal lookup.")
+            return None
         logger.info(f"Getting journal info for title: {title}, issn: {issn}")
         return SciMagoJR("latest").get_journal(title=title, issn=issn)
 
@@ -354,10 +420,18 @@ class ArtFinder:
         """
 
         if article is not None:
-            title = article.journal
-            issn = article.issn
+            title = _clean_str(article.journal)
+            issn = _clean_issn(article.issn)
             # Special treatment of SPIE proceedings
-            if article.type == "proceedings-article" and article.publisher == "spie":
+            if (
+                _clean_str(article.type) == "proceedings-article"
+                and _clean_str(article.publisher) == "spie"
+            ):
                 issn = ["0277786X", "1996756X"]
+        if title is None and issn is None:
+            logger.warning(
+                "No journal title or ISSN available, skipping white list lookup."
+            )
+            return None
         logger.info(f"Getting journal info for title: {title}, issn: {issn}")
         return get_journal_info_sync(title=title, issn=issn)

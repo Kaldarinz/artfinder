@@ -57,6 +57,9 @@ exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
+# Test the checkout pytest was started from, not the one the venv is installed from.
+# Relative to rootdir, so each worktree tests its own source. See docs/test_setup.md.
+pythonpath = ["src"]
 filterwarnings = [
   "ignore:.*SwigPy.*has no __module__ attribute:DeprecationWarning",
   "ignore:.*swigvarlink.*has no __module__ attribute:DeprecationWarning",

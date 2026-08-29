@@ -49,6 +49,13 @@ class SciMagoJR:
             A pandas Series containing the journal data, or None if not found.
         """
 
+        # Callers pass values straight out of a DataFrame, where an absent title is
+        # pd.NA or NaN and an absent ISSN list is empty. Treat both as "not provided"
+        # rather than calling string methods on them.
+        if not isinstance(title, str) or not title.strip():
+            title = None
+        issn = [i.strip() for i in issn or [] if isinstance(i, str) and i.strip()] or None
+
         if title is None and issn is None:
             logger.error("Either title or issn must be provided.")
             return None
@@ -62,8 +69,11 @@ class SciMagoJR:
             if not journal_data.empty:
                 journal_data.loc[:, "title"] = title
         if journal_data.empty and issn is not None:
-            for issn_ in issn:  # type: ignore
-                journal_data = self.all_data[self.all_data["Issn"].str.contains(issn_)]
+            for issn_ in issn:
+                # The ISSN is data, not a pattern -- a stray "(" would raise.
+                journal_data = self.all_data[
+                    self.all_data["Issn"].str.contains(re.escape(issn_))
+                ]
                 if not journal_data.empty:
                     break
         if journal_data.empty:

@@ -58,6 +58,20 @@ class ArticlePDF:
     "Maximum fraction of page area for an image to be considered valid."
     MARGIN = 2
     "Margin in points for rectangles."
+    DOI_PATTERN = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
+    "Pattern of a DOI in text. The prefix dot is literal: `1000/x` is not a DOI."
+    XMP_DOI_PATTERN = re.compile(
+        r"(?:prism:doi|dc:identifier|doi)[^>]*>\s*(?:doi:)?(10\.\d{4,9}/[^<\s]+)",
+        re.IGNORECASE,
+    )
+    "Pattern of a DOI inside the XMP metadata packet."
+    REFERENCES_HEADING_PATTERN = re.compile(
+        r"^[ \t]*(?:\d+\.?[ \t]*)?"
+        r"(?:references and notes|references|bibliography|literature cited)"
+        r"[ \t]*:?[ \t]*$",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    "Pattern of a standalone bibliography heading, used to stop the DOI search."
 
     def __init__(self, pdf: PathLike | str | bytes, identifier: str = ""):
         """
@@ -632,6 +646,12 @@ class ArticlePDF:
         """
         Get DOI of the article from the PDF metadata or article text.
 
+        Sources are tried in order of decreasing reliability: the ``subject`` metadata
+        key, the XMP metadata packet, then page text. Page text is scanned in page
+        order and the first page yielding a DOI wins, because the article's own DOI
+        appears in the front matter while the bibliography holds the DOIs of cited
+        works. Scanning stops at the bibliography for the same reason.
+
         This method may fail if the doi is missing in metadata and text was OCRed poorly.
         This is especially true for scanned old documents.
 
@@ -648,22 +668,122 @@ class ArticlePDF:
             if doi:
                 return doi
 
+        if xmp_doi := self._extract_doi_from_xmp():
+            return xmp_doi
+
         for page_no in range(self.file.page_count):
             page_text = self.file[page_no].get_text()
-            if isinstance(page_text, str):
-                doi = self.extract_doi_from_text(page_text)
-                if doi is not None:
-                    return doi
+            if not isinstance(page_text, str):
+                continue
+            # The bibliography lists the DOIs of cited works, never the article's own.
+            refs_match = self.REFERENCES_HEADING_PATTERN.search(page_text)
+            if refs_match is not None:
+                page_text = page_text[: refs_match.start()]
+            doi = self.extract_doi_from_text(page_text)
+            if doi is not None:
+                return doi
+            if refs_match is not None:
+                break
         warn(f"DOI not found in metadata or text of {self}.")
         return None
 
+    def _extract_doi_from_xmp(self) -> str | None:
+        """
+        Get DOI from the XMP metadata packet of the PDF, if it carries one.
+
+        Returns
+        -------
+        str | None
+            DOI string if the packet exists and holds one, otherwise None.
+        """
+
+        try:
+            xmp = self.file.get_xml_metadata()
+        except Exception:  # noqa: BLE001 - pymupdf raises varied types without a packet
+            return None
+        if not xmp:
+            return None
+        match = self.XMP_DOI_PATTERN.search(xmp)
+        return self._normalize_doi_candidate(match.group(1)) if match else None
+
+    @classmethod
+    def _normalize_doi_candidate(cls, candidate: str) -> str:
+        """
+        Strip the decorations publishers append to a DOI in running text.
+
+        Parameters
+        ----------
+        candidate : str
+            Raw DOI match.
+
+        Returns
+        -------
+        str
+            Lowercased DOI without a supplemental-material suffix or trailing
+            sentence punctuation.
+        """
+
+        # ".../-/DCSupplemental" and friends address the supplement, not the article.
+        return re.split(r"/-/", candidate.lower())[0].rstrip(".,;:)")
+
+    @classmethod
+    def extract_doi_candidates(cls, text: str) -> list[str]:
+        """
+        Find every DOI in a piece of text, most complete candidates first.
+
+        A DOI broken across a line is rejoined before matching, and a candidate that
+        is a strict prefix of another is dropped: a DOI wrapped after its ``.``
+        separator would otherwise yield a valid-looking but truncated prefix.
+
+        Parameters
+        ----------
+        text : str
+            Text to search.
+
+        Returns
+        -------
+        list[str]
+            Deduplicated lowercase DOIs in order of appearance.
+        """
+
+        # Rejoin a line break inside a DOI. Anchoring on the characters a DOI cannot
+        # end with keeps this from gluing ordinary prose together -- and a blanket
+        # newline strip would let a match run on into the following word, since the
+        # DOI character class contains letters and digits.
+        text = re.sub(r"([./-])[ \t]*\n[ \t]*(?=[-._;()/:A-Za-z0-9])", r"\1", text)
+
+        candidates: list[str] = []
+        for match in cls.DOI_PATTERN.finditer(text):
+            candidate = cls._normalize_doi_candidate(match.group())
+            if candidate not in candidates:
+                candidates.append(candidate)
+        return [
+            candidate
+            for candidate in candidates
+            if not any(
+                other != candidate and other.startswith(candidate)
+                for other in candidates
+            )
+        ]
+
     @classmethod
     def extract_doi_from_text(cls, text: str) -> str | None:
+        """
+        Find the first complete DOI in a piece of text.
 
-        # Search for DOI pattern in the text
-        doi_pattern = re.compile(r"10.\d{4,9}/[-._;()/:A-Z0-9]+(?<!\.)", re.IGNORECASE)
-        match = doi_pattern.search(text)
-        return match.group().lower() if match is not None else None
+        Parameters
+        ----------
+        text : str
+            Text to search.
+
+        Returns
+        -------
+        str | None
+            DOI string if found, otherwise None.
+        """
+
+        candidates = cls.extract_doi_candidates(text)
+        return candidates[0] if candidates else None
 
     def extract_figure_drawings(
         self,
