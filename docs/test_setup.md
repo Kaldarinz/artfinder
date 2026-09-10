@@ -30,7 +30,7 @@ edits appear to have no effect.
 Single file / single test:
 
 ```bash
-venv/bin/python -m pytest tests/test_article_pdf/test_figure_captions.py -k test_figure_captions_keys_are_integers
+venv/bin/python -m pytest tests/test_article_pdf/test_figure_captions.py -k test_figure_captions_keys_are_labels
 ```
 
 If results look impossible — a new test failing on code you can see is correct, or an
@@ -78,6 +78,9 @@ There is no CI, and the type check is not clean. As of the DOI-extraction work
 
 - `venv/bin/python -m pytest tests` — all tests pass.
 - `venv/bin/mypy src/artfinder tests` — **75 errors in 8 files**, all pre-existing.
+
+Re-measured before the figure-label work (2026-09-10) on the same commit: **79 errors in
+9 files**. Use the larger, current number when comparing.
 
 Most are `Page? has no attribute ...` from incomplete PyMuPDF stubs. Compare against this
 number rather than expecting zero: the rule in `AGENTS.md` is to resolve errors *in the

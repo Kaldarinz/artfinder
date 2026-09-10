@@ -235,5 +235,71 @@
         "6": "Optical microscopy and AFM images of the film without the nanoparticles (a, c) and with the nanoparticles (b, d), respectively",
         "8": "Transmission spectra of the films with and without the nanoparticles",
         "9": "Refractive index (a) and extinction coefficient (b) of the films determined from spectroscopic ellipsometry measurements"
+    },
+    "laser-ablative engineering of zrn-based nanoparticles for photothermal therapy and sers-based biological imaging_si.pdf": {
+        "S1": "Optical characteristics of ZrN NPs solutions. Solutions synthesized in (a) acetone and (b) ethanol.",
+        "S2": "Normalized absorption spectra and stability evaluation of ZrN-based NPs. Samples prepared in (a,c) acetone and (b,d) ethanol before and after transfer to water.",
+        "S3": "High resolution transmission electron microscopy (HR-TEM) images of ZrN-based core@shell nanostructures. Samples prepared in (a,b) acetone and (c-e) ethanol.",
+        "S4": "XPS survey spectra. Nanoparticles synthesized in (a) acetone and (b) ethanol. Silicon peaks are associated with a signal that comes from a glass substrate. Additional peaks are due to contaminants on the substrate surface.",
+        "S5": "Calculated plasmonic absorption (left) and field-enhancement (right) properties of ZrN-based nanoparticles. (a) ZrN/ZrO 2 core structure; (b) ZrN/ZrO 2 @a-C core@shell structure. Inset shows dependence of peak wavelength vs volume fraction v f of oxide inclusions.",
+        "S6": "Stability evaluation of ZrN and ZrN@Chit nanoparticles in different buffers.",
+        "S7": "Cytometry investigation of quantity of apoptotic and necrotic cells after the heating at 75 \u00b0C for 10 min (a) and after their incubation with 1 \u03bcm staurosporine for 4 h (b).",
+        "S8": "Labeling of EGFR-overexpressing A431 cells and EGFR-negative CHO cells with Z HER1:1907 affibody.",
+        "S9": "Temperature measurements of cell suspensions labeled with ZrN-based NPs at different concentrations during irradiation with 808 nm laser. Laser power is 1200 mW.",
+        "S10": "Clonogenic assay assessing ZrN@Chit*Z HER1:1907 NPs cytotoxicity for A431 and CHO cells: (a) images of formed colonies and (b,c) quantitative evaluation of stained area surface. Cells were incubated with ZrN@Chit*Z HER1:1907 NPs at different concentrations, irradiated with 805-nm light, and seeded on culture plates to get colonies being formed. Data was normilized to the cells grown without nanoparticles and laser irradation.",
+        "S11": "Azo-CN-OH molecule and its optical characteristics. (a) Azo-CN-OH structure. (b) Azo-CN-OH absorption and transmission spectra.",
+        "S12": "Imaging of ZrN/Azo-CN-OH conjugate cluster on the glass substrate in water. Scanning area was 14x13 \u00b5m 2. Accumulation time per point is 500 ms; scanning step is 1 \u00b5m. Laser power is 5 mW@785nm. (a) Transmission image, scanned area is outlined by blue rectangular. (b) Raman map at 1133 cm -1. (c) Raman spectra, corresponding map points with maximum (red) and minimum (blue) Intensities in the imaging (b).",
+        "S13": "Calculated absorption cross-section of 20 nm ZrN and TiN-based core@shell nanoparticles."
+    },
+    "laser fragmentation of colloidal gold nanoparticles with high-intensity nanosecond pulses_si.pdf": {
+        "S1": "Relative mass distribution of gold nanoparticles after LAL and fractionated",
+        "S2": "Schematic diagram of fluid dynamic observation of the free liquid jet",
+        "S3": "Absorption cross section of gold nanoparticles of different sizes, calculated using",
+        "S4": "Comparison of size distributions obtained from TEM, AUC, and ADC",
+        "S5": "Mass-specific thermal energy (left axis) absorbed by the AuNP during laser",
+        "S6": "Absorbance spectra (before and after LFL) in relation to the educt particle size:",
+        "S7": "TEM Images after LFL with 1\u20134 pulses per volume (PPV). A) 1 PPV, B) 2 PPVs,",
+        "S8": "Comparative UV/Vis-spectra of particles synthesized with a different number of",
+        "S9": "Size distribution plot of AuNPs after 1 to 4 PPVs in water in the presence of different",
+        "S10": "Long-term stability of the laser power for \u2018ns-high-RR.\u2019",
+        "S11": "TEM Images after fragmentation in regimes 1 (A) and 2 (B)."
+    },
+    "tunable nanostructuring for van der waals materials_si.pdf": {
+        "S1": "Three-dimensional representation of the crystal structure of vdW materials, pictures of initial crystals/powders/solutions, and TEM image of laser-synthesized vdW NPs divided into different material families (TMDCs: Sulfides, Selenides, Tellurides, Janus, M(A)Xenes, Others).",
+        "S2": "Dependence of (a) size, (b) optical, and (c) compositional properties of MoS 2, WS 2, and Ti 3 C 2 NPs on liquid type, respectively. (d) Zeta-potential distribution of various laser-synthesized vdW NPs, confirming high colloidal stability.",
+        "S3": "The atomic structure of MoS 2 polycrystalline NP for various temperatures generated in MD.",
+        "S4": "MD calculated dependence of the fraction of all atoms in the NP shell on (a) the average size of the inner crystallite and (b) the cooling rate.",
+        "S5": "Comparison of elastic properties between MoS 2 and WS 2. (a) Top: TEM images of spherical MoS 2 and polygonal WS 2 nanoparticles. Bottom: relaxed multilayer structures with three-shell and three-core crystalline models, and the cylindrical deformation model. (b) Bending modulus and critical angle analysis for single-layer MoS 2 and WS 2."
+    },
+    "boron nanoparticle-enhanced proton therapy for cancer treatment_si.pdf": {
+        "S1": "Cell viability via MTT assay after 24, 48 and 72 hours of incubation with boron nanoparticles.",
+        "S2": "Analysis of cell morphology, apoptosis and Live/Dead assay 24 hours after incubation with boron nano-",
+        "S3": "Clonogenic assay after 24, 48 and 72 hours of incubation with boron nanoparticles. Scale bar\u20141 mm",
+        "S4": "Scheme of irradiation of culture flasks (a, b) and dose distribution in the module for calculating the irra-",
+        "S5": "Dose-dependent response of clonogenic activity after proton beam irradiation in the Bragg peak."
+    },
+    "laser-synthesized plasmonic hfn-based nanoparticles as a novel multifunctional agent for photothermal therapy_si.pdf": {
+        "S1": "Calculated Joule number values, proportional to absorption cross-section \u03c3 abs for HfN NPs in water (blue line) and hafnium oxide (red line) surrounding medium.",
+        "S2": "HR-TEM images of HfN-based NPs prepared in (a) ethanol and (b) acetone. The interplanar spacing of the laser-synthesized NPs is about 0.26 nm, which corresponds to the table value for (111) plane of crystalline HfN.",
+        "S3": "EDX spectrum of HfN-based NPs prepared in acetonitrile.",
+        "S4": "XRD patterns of HfN-based NPs powders prepared in ethanol (blue line) and acetone (green line). Table positions of crystalline HfN and Hf 7 O 8 N 4 are given above the pattern.",
+        "S5": "XPS survey spectrum of HfN NPs prepared in acetonitrile.",
+        "S6": "X-ray Photoelectron Spectroscopy (XPS) characterization of laser-synthesized HfN-based NPs in ethanol (left) and acetone (right): Hf 4f (a), N 1s (b), O 1s (c). Shirley background correction is applied.",
+        "S7": "Dependence of negative natural logarithm of temperature ratio on cooling time."
+    },
+    "data-driven pre-determination of cu oxidation state in copper nanoparticles_si.pdf": {
+        "S1": "Sketch of the procedure for adaptation of (feature, output) or (super-feature, output) data to the Log-Log plot (decimal log) before the linear regression of the dataset. Some data have negative or 0 values (A), which cannot be converted directly to a Log-Log scale. To avoid the exclusion of data \u2264 0 from the Log-Log plot, each list was rigidly shifted to ensure that its minimum become > 0 (B). The procedure worked in two steps: (i) each list was shifted so that the minimum of each list become 0; (ii) each list was shifted again so that the minimum of each list become 1/20 of the penultimate value, leading to the final (feature\u2019, output\u2019) or (super-feature\u2019, output\u2019) datasets. Finally, these shifted but complete datasets were used for the linear regression (C).",
+        "S2": "R 2 (A) and s.e. (%) on the slope (B) for the linear regression of single feature analysis. (C) Log-Log plot for the feature P12 with the best correlation with Cu oxidation state. The dashed lines identify three subsets of data which are not fitted simultaneously by the model. (D-E) R 2 (D) and s.e. (%) on the slope (E) for the linear regression of single feature analysis versus the average of the Cu oxidation state for each feature value (<output>). (F) Log-Log plot for the three features (P11, P35, P23) with the best correlation with the average Cu oxidation state for each feature value.",
+        "S3": "Sketch of the procedure for the calculation of (feature, <output>) couples, which are subsequently transformed in (feature\u2019, <output>\u2019) couples as described in Figure S1 and fitted with a linear regression with the results reported in Figure 2D-E-F.",
+        "S4": "R 2 (A) and s.e. (%) on the slope (B) for the linear regression of the super-features analysis. (C) Log-Log plot for the super-feature SP_F, also shown in the figure, which has the best correlation with the oxidation state of Cu, as described by the equation below the plot. The dashed lines identifiy three subsets of data which are not fitted simultaneously by the model.",
+        "S5": "A-C) R 2 of the linear fit of the predicted values versus real values for the training and test datasets taken from the literature and using the best 9, 10 or 11 features resulting from the ranking in Table S4. Red bars report the R 2 of the linear fit for the predicted values versus the values obtained from the experiments in this study. MAE (D-F) and RMSE (G-I) are also reported showing that the models maintain more stable or better performance with 9 features.",
+        "S6": "Average R 2 (A), MAE (B) and RMSE (C) on the best five training and test inputs obtained after splitting for different sources. Red bars report the R 2 of the linear fit, MAE and RMSE for the predicted values versus the values obtained from the experiments in this study.",
+        "S7": "Prediction of the variation of the oxidation state as a function of the % of O+Cl+CN+S in solvent molecules (P12) and solute molecules (P31) at two solute concentrations (P36 = 0.001 and 0.1) and two different numbers of atoms in solvent molecules (P11: 3 and 12), and as a function of the number of atoms (P11) and of the % of O+Cl+CN+S (P12) in solvent molecules for a % of O+Cl+CN+S in solute (P31) of 100 and two solute concentrations (P36 = 0.1 and 0.001). Set-up parameters are fixed as reported in the tables above each graph considering typical experimental conditions for kHz LAL with ns (A) or ps (B) pulses and MHz LAL (C). All predictions are obtained with the best model (Voting Regressor). The general trend of the predictions is similar to the results in Figure 6 of the main article, where ns laser pulses with repetition rate of 50 Hz and energy in the range of mJ/pulse are adopted. However, the predictions for a higher repetition rate and lower pulse energy indicate a slight increase of the oxidation state, which can be reduced by shortening the pulse duration from ns to ps."
+    },
+    "whole-cell patch-clamp measurements of spermatozoa reveal an alkaline-activated ca channel_with_si.pdf": {
+        "1": "Whole-cell patch-clamp recordings from intact spermatozoa. a, Left, the tight seal formed with the cytoplasmic droplet of the spermatozoon. Right, \ufb02uorescent image of the same spermatozoon after formation of the whole-cell con\ufb01guration. Lucifer yellow (1 mM) diffused from the pipette throughout the interior of the spermatozoon in, 5 s. Scale bar, 10 m m. b, Whole-cell currents elicited by a ramp from a holding potential (V H) of 0 mV in DVF conditions from wild-type (top) and Catsper1 2 / 2 (bottom) sperm. c, Representative I CatSper in response to a step protocol from V H \u00bc 0 mV in DVF conditions. d, I CatSper recorded in perforated-patch mode of whole-cell recording.",
+        "2": "I CatSper originates from the principal piece of the sperm cell \ufb02agellum. a, Whole-cell recordings from a beheaded sperm cell containing only the mid- and principal piece (value ^ s.e.m.: C \u00bc 1.9 ^ 0.2 pF; n \u00bc 7). b, Whole-cell recording from sperm cell head and midpiece (C \u00bc 1.2 ^ 0.2 pF; n \u00bc 5). Note the cytoplasmic droplet (arrow).",
+        "3": "I CatSper is Ca 2 1 selective. a, Monovalent I CatSper was potently reduced in increasing [Ca 2 \u00fe ] o. Top, representative I CatSper traces elicited by a voltage ramp in the presence of different [Ca 2 \u00fe ] o (V H \u00bc 0 mV). Bottom, relative I CatSper amplitudes at 2 100 mV plotted against varying [Ca 2 \u00fe ] o (data are mean ^ s.d.; n \u00bc 8). b, Divalent current elicited by a voltage ramp (V H \u00bc 0 mV) with Ca 2 \u00fe or Ba 2 \u00fe as divalent ions. No inward current was detected in Mg 2 \u00fe. \u20180\u2019 divalent concentration refers to nominal concentration.",
+        "4": "pH and voltage-dependence of I CatSper. a, I CatSper relaxation (tail currents after subtraction of current in 5 mM [Mg 2 \u00fe ] o) after instantaneous jump to 2 150 mV from voltages ranging from 2 120 mV to \u00fe 160 mV (V H \u00bc 2 70 mV) at pH i 7.5 (top) and pH i 6.0 (bottom). b, Activation curves (\ufb01t to Boltzmann equation) of I CatSper at pH i 7.5 and pH i 6.0, showing that alkalinization increases I CatSper in the physiological range of potential (data are mean ^ s.e.m.). c, Histogram showing the dependence of the mean I CatSper Ba 2 \u00fe amplitude on pH pip. Ba 2 \u00fe tail currents were elicited by stepping V H from 0 to 2 100 mV. Bath [Ba 2 \u00fe ] \u00bc 50 mM; current was measured at 2 100 mV after subtraction of the capacitive transients. d, Addition of 10 mM NH 4 Cl to the bath solution elicited robust Ba 2 \u00fe I CatSper (pH pip \u00bc 6; V H \u00bc 0 mV)."
     }
 }

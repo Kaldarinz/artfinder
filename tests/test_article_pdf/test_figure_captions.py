@@ -3,6 +3,7 @@ Tests for ArticlePDF figure captions extraction.
 """
 
 import json
+import re
 import pytest
 from pathlib import Path
 from artfinder.article_pdf import ArticlePDF
@@ -42,8 +43,8 @@ class TestFigureCaptions:
         first_pdf = next(iter(expected_captions.keys()))
         assert isinstance(expected_captions[first_pdf], dict)
 
-    def test_figure_captions_keys_are_integers(self, pdf_files):
-        """Test that figure_captions keys are integers."""
+    def test_figure_captions_keys_are_labels(self, pdf_files):
+        """Test that figure_captions keys are figure labels."""
         if not pdf_files:
             pytest.skip("No PDF files found in test directory")
 
@@ -51,7 +52,10 @@ class TestFigureCaptions:
         captions = article.figure_captions
 
         for key in captions.keys():
-            assert isinstance(key, int), f"Expected int key, got {type(key)}"
+            assert isinstance(key, str), f"Expected str key, got {type(key)}"
+            assert re.fullmatch(
+                r"S?\d+", key
+            ), f"Expected a figure label like '1' or 'S1', got {key!r}"
 
         article.close()
 
@@ -115,24 +119,23 @@ class TestFigureCaptions:
                         )
                         continue
 
-                    # Check caption numbers
-                    expected_nums = set(int(k) for k in expected.keys())
-                    actual_nums = set(captions.keys())
-                    if actual_nums != expected_nums:
+                    # Check caption labels
+                    expected_labels = set(expected.keys())
+                    actual_labels = set(captions.keys())
+                    if actual_labels != expected_labels:
                         results.append(
                             (
                                 pdf_name,
                                 "FAIL",
-                                f"Figure numbers mismatch: expected {expected_nums}, got {actual_nums}",
+                                f"Figure labels mismatch: expected {expected_labels}, got {actual_labels}",
                             )
                         )
                         continue
 
                     # Check caption text
                     all_match = True
-                    for fig_num_str, expected_text in expected.items():
-                        fig_num = int(fig_num_str)
-                        if captions[fig_num] != expected_text:
+                    for fig_label, expected_text in expected.items():
+                        if captions[fig_label] != expected_text:
                             all_match = False
                             break
 

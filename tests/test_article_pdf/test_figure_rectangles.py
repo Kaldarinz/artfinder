@@ -83,24 +83,23 @@ class TestFigureRectangles:
                         )
                         continue
 
-                    # Check figure numbers
-                    expected_nums = set(int(k) for k in expected.keys())
-                    actual_nums = set(figures.keys())
-                    if actual_nums != expected_nums:
+                    # Check figure labels
+                    expected_labels = set(expected.keys())
+                    actual_labels = set(figures.keys())
+                    if actual_labels != expected_labels:
                         results.append(
                             (
                                 pdf_name,
                                 "FAIL",
-                                f"Figure numbers mismatch: expected {expected_nums}, got {actual_nums}",
+                                f"Figure labels mismatch: expected {expected_labels}, got {actual_labels}",
                             )
                         )
                         continue
 
                     # Check rectangle coordinates (with tolerance for rounding errors)
                     all_match = True
-                    for fig_num_str, expected_rect in expected.items():
-                        fig_num = int(fig_num_str)
-                        extracted_rect = tuple(figures[fig_num].rect)
+                    for fig_label, expected_rect in expected.items():
+                        extracted_rect = tuple(figures[fig_label].rect)
                         expected_rect_tuple = tuple(expected_rect)
 
                         # Use pytest.approx for floating-point comparison

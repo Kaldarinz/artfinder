@@ -238,11 +238,14 @@ class DocumentType(StrEnum):
 class DocumentElementsPDF(StrEnum):
     FIGURE = "figures"
     FIGURE_CAPTION = "figure_captions"
+    TABLE = "tables"
+    TABLE_CAPTION = "table_captions"
     TEXT = "text"
     PARAGRAPH = "paragraphs"
     IMAGE = "images"
     DRAWING = "drawings"
     HEADER = "headers"
+    FOOTER = "footers"
     ALL = "all"
 
 @dataclass(frozen=True)
@@ -647,6 +650,7 @@ class Size:
 @dataclass(frozen=True)
 class FigureCaptionPDF:
     matched_pattern: str
+    label: str
     text: str
     font_props: tuple[int, int, str]
     lines_no: int
@@ -657,5 +661,15 @@ class FigureCaptionPDF:
 class FigurePDF:
     rect: Rect
     caption: FigureCaptionPDF
+
+
+@dataclass
+class TablePDF:
+    rect: Rect
+    "Rectangle of the table body, without its caption."
+    caption: FigureCaptionPDF
+    "Caption of the table."
+    caption_above: bool
+    "Whether the caption is printed above the table body rather than below it."
 
 
