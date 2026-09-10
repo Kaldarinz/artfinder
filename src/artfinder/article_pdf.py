@@ -21,7 +21,7 @@ from math import floor
 from statistics import median
 from os import PathLike
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 from warnings import warn
 
 import pandas as pd
@@ -81,6 +81,18 @@ class ArticlePDF:
     "Precidion digits for clipping rects coordinates."
     MAX_IMAGE_AREA = 0.8
     "Maximum fraction of page area for an image to be considered valid."
+    POINTS_PER_INCH = 72
+    "Points in an inch, the unit PDF coordinates are given in."
+    MIN_FIGURE_DPI = 150
+    "Lowest resolution `dpi='auto'` rasterizes a figure at."
+    MAX_FIGURE_DPI = 300
+    """Highest resolution `dpi='auto'` rasterizes a figure at. Caps both the
+    output size and the pixmap area for a figure carrying a print-resolution
+    image."""
+    VECTOR_FIGURE_DPI = 300
+    """Resolution `dpi='auto'` rasterizes a figure holding no raster image at.
+    Vectors and text carry no resolution of their own to measure, and render
+    the more faithfully the higher it is."""
     MARGIN = 2
     "Margin in points for rectangles."
     MAX_LINE_PITCH = 60.0
@@ -1219,13 +1231,55 @@ class ArticlePDF:
         candidates = cls.extract_doi_candidates(text)
         return candidates[0] if candidates else None
 
+    def _figure_dpi(self, figure_label: str) -> int:
+        """
+        Resolution to rasterize a figure at, derived from the images it holds.
+
+        The sharpest raster image in the figure sets the rate: rendering below
+        its native resolution throws away detail that is present in the PDF,
+        rendering above it only enlarges pixels. The result is clamped to
+        `MIN_FIGURE_DPI`..`MAX_FIGURE_DPI`; a figure drawn entirely in vectors
+        and text has no raster to measure and gets `VECTOR_FIGURE_DPI`.
+
+        An image reported by `get_image_info` is measured over its whole
+        placement box, so a cropped one reads lower than its true resolution —
+        the estimate errs low.
+
+        Parameters
+        ----------
+        figure_label : str
+            Label of the figure.
+
+        Returns
+        -------
+        int
+            DPI to rasterize the figure at.
+        """
+
+        dpis = [
+            max(
+                image.width * self.POINTS_PER_INCH / image.rect.width,
+                image.height * self.POINTS_PER_INCH / image.rect.height,
+            )
+            for image in self.get_figure_images(figure_label)
+            if image.width
+            and image.height
+            and image.rect.width > 0
+            and image.rect.height > 0
+        ]
+        if not dpis:
+            return self.VECTOR_FIGURE_DPI
+        return int(
+            min(self.MAX_FIGURE_DPI, max(self.MIN_FIGURE_DPI, round(max(dpis))))
+        )
+
     def extract_figure_drawings(
         self,
         figure_label: str | None = None,
         page_index: int | None = None,
         highlight_white: bool = True,
         output_path: PathLike | str = Path("figures"),
-        dpi: int = 150,
+        dpi: int | Literal["auto"] = "auto",
     ) -> list[Path]:
         """
         Extract vector graphics component of a figure as a separate image.
@@ -1241,8 +1295,10 @@ class ArticlePDF:
             Whether to highlight white drawings by placing a border around them.
         output_path : PathLike | str, default=Path("figures")
             Path to save the extracted figure images.
-        dpi : int, default=150
-            DPI for the output images.
+        dpi : int | "auto", default="auto"
+            DPI for the output images. `"auto"` derives it per figure from the
+            native resolution of the raster images inside it, see
+            `_figure_dpi`.
 
         Returns
         -------
@@ -1263,6 +1319,7 @@ class ArticlePDF:
         paths: list[Path] = []
         output_path.mkdir(parents=True, exist_ok=True)
         for fig_label in figures:
+            fig_dpi = self._figure_dpi(fig_label) if dpi == "auto" else dpi
             fig_drawings = self.get_figure_drawings(
                 fig_label, copy_objects=highlight_white
             )
@@ -1273,7 +1330,7 @@ class ArticlePDF:
                             drawing.width = 1
                 drawings_page = self._make_drawings(fig_drawings)
                 pixmap = drawings_page.get_pixmap(
-                    dpi=dpi, clip=figures[fig_label].rect
+                    dpi=fig_dpi, clip=figures[fig_label].rect
                 )
 
                 path = output_path / Path(
@@ -1289,7 +1346,7 @@ class ArticlePDF:
         figure_label: str | None = None,
         page_index: int | None = None,
         output_path: PathLike | str = Path("figures"),
-        dpi: int = 150,
+        dpi: int | Literal["auto"] = "auto",
     ) -> list[Path]:
         """
         Extract text component of a figure as a separate image.
@@ -1303,8 +1360,10 @@ class ArticlePDF:
             specified by figure_label.
         output_path : PathLike | str, default=Path("figures")
             Path to save the extracted figure images.
-        dpi : int, default=150
-            DPI for the output images.
+        dpi : int | "auto", default="auto"
+            DPI for the output images. `"auto"` derives it per figure from the
+            native resolution of the raster images inside it, see
+            `_figure_dpi`.
 
         Returns
         -------
@@ -1325,11 +1384,12 @@ class ArticlePDF:
         paths: list[Path] = []
         output_path.mkdir(parents=True, exist_ok=True)
         for fig_label in figures:
+            fig_dpi = self._figure_dpi(fig_label) if dpi == "auto" else dpi
             figure_texts = self.get_figure_texts(fig_label)
             if figure_texts:
                 figure_text_page = self._make_text(figure_texts)
                 pixmap = figure_text_page.get_pixmap(
-                    dpi=dpi, clip=figures[fig_label].rect
+                    dpi=fig_dpi, clip=figures[fig_label].rect
                 )
 
                 path = output_path / Path(f"{self.identifier}_fig_{fig_label}_text.png")
@@ -1343,7 +1403,7 @@ class ArticlePDF:
         figure_label: str | None = None,
         page_index: int | None = None,
         output_path: PathLike | str = Path("figures"),
-        dpi: int = 150,
+        dpi: int | Literal["auto"] = "auto",
     ) -> list[Path]:
         """
         Extract images component of a figure as a separate image.
@@ -1357,8 +1417,10 @@ class ArticlePDF:
             specified by figure_label.
         output_path : PathLike | str, default=Path("figures")
             Path to save the extracted figure images.
-        dpi : int, default=150
-            DPI for the output images.
+        dpi : int | "auto", default="auto"
+            DPI for the output images. `"auto"` derives it per figure from the
+            native resolution of the raster images inside it, see
+            `_figure_dpi`.
 
         Returns
         -------
@@ -1379,11 +1441,12 @@ class ArticlePDF:
         paths: list[Path] = []
         output_path.mkdir(parents=True, exist_ok=True)
         for fig_label in figures:
+            fig_dpi = self._figure_dpi(fig_label) if dpi == "auto" else dpi
             figure_images = self.get_figure_images(fig_label)
             if figure_images:
                 figure_image_page = self._make_image(figure_images)
                 pixmap = figure_image_page.get_pixmap(
-                    dpi=dpi, clip=figures[fig_label].rect
+                    dpi=fig_dpi, clip=figures[fig_label].rect
                 )
 
                 path = output_path / Path(f"{self.identifier}_fig_{fig_label}_image.png")
@@ -1398,7 +1461,7 @@ class ArticlePDF:
         page_index: int | None = None,
         output_path: PathLike | str = Path("figures"),
         extract_bases: bool = False,
-        dpi: int = 150,
+        dpi: int | Literal["auto"] = "auto",
     ) -> dict[str, Path]:
         """
         Extract a specific figure as a separate images.
@@ -1414,8 +1477,10 @@ class ArticlePDF:
             Path to save the extracted figure images.
         extract_bases : bool, default=False
             Whether to also extract the base components (drawings, images, text)
-        dpi : int, default=150
-            DPI for the output images.
+        dpi : int | "auto", default="auto"
+            DPI for the output images. `"auto"` derives it per figure from the
+            native resolution of the raster images inside it, see
+            `_figure_dpi`.
 
         Returns
         -------
@@ -1436,9 +1501,10 @@ class ArticlePDF:
         paths: dict[str, Path] = {}
         output_path.mkdir(parents=True, exist_ok=True)
         for fig_label in figures:
+            fig_dpi = self._figure_dpi(fig_label) if dpi == "auto" else dpi
             page_ind = self._figure_label_to_page_ind[fig_label]
             pixmap = self.file[page_ind].get_pixmap(
-                dpi=dpi, clip=figures[fig_label].rect
+                dpi=fig_dpi, clip=figures[fig_label].rect
             )
 
             path = output_path / Path(f"{self.identifier}_fig_{fig_label}.png")
@@ -1449,19 +1515,19 @@ class ArticlePDF:
                     figure_label=fig_label,
                     page_index=page_ind,
                     output_path=output_path,
-                    dpi=dpi,
+                    dpi=fig_dpi,
                 )
                 self.extract_figure_images(
                     figure_label=fig_label,
                     page_index=page_ind,
                     output_path=output_path,
-                    dpi=dpi,
+                    dpi=fig_dpi,
                 )
                 self.extract_figure_text(
                     figure_label=fig_label,
                     page_index=page_ind,
                     output_path=output_path,
-                    dpi=dpi,
+                    dpi=fig_dpi,
                 )
 
         return paths
