@@ -775,6 +775,15 @@ class ArticlePDF:
         it — the rule the captions are stitched by — and lies within its
         horizontal span.
 
+        A short document may have no body width to measure: a one-page
+        supplementary file is a title, an author list and a stack of affiliations
+        of a different width each, none of them repeated often enough for
+        `_calc_paragraph_width` to cluster, which leaves the width at zero and
+        every block outside it. Every prose block then seeds a paragraph
+        instead — without it the page has no paragraph at all and the figure
+        below them, bounded by the nearest paragraph above its caption, grows to
+        the top of the page and swallows the whole title block.
+
         Parameters
         ----------
         page_no : int
@@ -787,11 +796,16 @@ class ArticlePDF:
         """
 
         blocks = self._text_cache[page_no]
-        paragraphs = [
-            block
-            for block in blocks
-            if self.paragraph_width.min <= block.rect.width <= self.paragraph_width.max
-        ]
+        if self.paragraph_width.mean > 0:
+            paragraphs = [
+                block
+                for block in blocks
+                if self.paragraph_width.min
+                <= block.rect.width
+                <= self.paragraph_width.max
+            ]
+        else:
+            paragraphs = [block for block in blocks if self._is_prose(block)]
         rects = [copy(block.rect) for block in paragraphs]
         taken = {id(block) for block in paragraphs}
         tolerance = max(1.0, self.LINE_PITCH_TOLERANCE * self.line_pitch)
@@ -2153,7 +2167,9 @@ class ArticlePDF:
         Returns
         -------
         Size
-            Mean, min, max width of the paragraph-width cluster.
+            Mean, min, max width of the paragraph-width cluster. All zero when
+            the document has no running text, or too little of it for any width
+            to repeat — `_get_paragraphs_from_page` then falls back to prose.
         """
 
         rects: list[Rect] = [
@@ -2163,7 +2179,10 @@ class ArticlePDF:
             if self._is_prose(block)
         ]
         if not rects:
-            warn(f"No running text found in {self}")
+            logger.debug(
+                f"No running text found in {self}."
+                + " Paragraphs fall back to prose, of which there is none."
+            )
             return Size(mean=0.0, min=0.0, max=0.0)
 
         text_blocks = pd.DataFrame(
@@ -2178,7 +2197,10 @@ class ArticlePDF:
 
         valid_blocks = text_blocks[text_blocks["groups"] != -1]
         if valid_blocks.empty:
-            warn(f"No clusters found (all points are noise) in {self}")
+            logger.debug(
+                f"No block width repeats often enough to cluster in {self}."
+                + " Paragraphs fall back to prose."
+            )
             return Size(mean=0.0, min=0.0, max=0.0)
 
         clusters = valid_blocks.pivot_table(
