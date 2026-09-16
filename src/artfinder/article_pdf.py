@@ -13,7 +13,7 @@ both, such as a preprint with its supplementary information appended.
 import logging
 import re
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from copy import copy, deepcopy
 from functools import cached_property
 from itertools import chain
@@ -2744,6 +2744,9 @@ class ArticlePDF:
         #       1.2.3 Page header, which is located above the figure caption
         #   1.3 Left and right bounds should ba adjusted only if article layout is
         #   multicolumn.
+        #   1.4 A figure narrowed to one column in 1.3 that holds an element
+        #   crossing the gutter is bounded again as a full-width figure: a short
+        #   caption is no evidence that the figure it belongs to is short too.
         # Some figures have their captions located on the left or right side.
         # There is a heuristic to determine whether caption is side caption:
         # Width of caption is less than 50% of paragraph width and has maltiple lines.
@@ -2753,7 +2756,6 @@ class ArticlePDF:
 
         result: list[FigurePDF] = []
         page = self.file[page_no]
-        page_width = page.rect.width
         figure_captions = self._figure_captions_cache[page_no]
 
         # First we should find all figures with side captions
@@ -2767,124 +2769,234 @@ class ArticlePDF:
                 side_capt_figures.append(FigurePDF(figure_rect, caption))
 
         for caption in figure_captions:
-            figure_rect = cast(Rect, copy(page.rect))
-            figure_rect.x0, figure_rect.x1 = self._line_number_gutter(page_no)
-
             # skip side captions
             if self._is_side_caption(page_no, caption.rect):
                 continue
 
-            # Lower boundary
-            figure_rect.y1 = caption.rect.y0
+            if self.columns_number > 2:
+                warn(
+                    f"Document {page.parent} page {page.number} has more than 2 columns. "
+                    "Only 2 columns are supported for figure extraction."
+                )
+                result.extend(side_capt_figures)
+                return tuple(result)
 
-            # Upper boundary
-            upper_bound_candidates: list[Rect] = []
-            paragraphs_above = self.get_paragraph_rects(
-                page_no=page_no, clip=figure_rect
+            figure_rect, gutter = self._bound_figure_rect(
+                page_no, caption, side_capt_figures, full_width=False
             )
 
-            # Columns could be shifted horizontaly so that the right boundary of
-            # the left column can be located more to the right than half of page width
-            # and vice versa
-            min_x0_right_col = page_width * 0.4
-            max_x1_left_col = page_width * 0.6
-            # if we have two column layout we need to check if figure is
-            # located in particular column and if so, check only paragraphs
-            # in that column
-            if self.columns_number > 1:
-                # figure is in right column
-                if caption.rect.x0 > min_x0_right_col:
-                    paragraphs_above = [
-                        rect for rect in paragraphs_above if rect.x0 > min_x0_right_col
-                    ]
-                # Figure is in left column
-                if caption.rect.x1 < max_x1_left_col:
-                    paragraphs_above = [
-                        rect for rect in paragraphs_above if rect.x1 < max_x1_left_col
-                    ]
-
-            if paragraphs_above:
-                lowest_paragraph = max(paragraphs_above, key=lambda x: x.y1)
-                upper_bound_candidates.append(lowest_paragraph)
-
-            # Search for figure caption above
-            other_caption_rects = self.get_figure_caption_rects(
-                page_no, clip=figure_rect
-            )
-            if self.columns_number > 1:
-                # If figure is in right column, then we don't care
-                # about other figures in left column
-                if caption.rect.x0 > min_x0_right_col:
-                    other_caption_rects = [
-                        rect
-                        for rect in other_caption_rects
-                        if rect.x0 > min_x0_right_col
-                    ]
-                # Figure is in left column, then we don't care
-                # about other figures
-                elif caption.rect.x1 < max_x1_left_col:
-                    other_caption_rects = [
-                        rect
-                        for rect in other_caption_rects
-                        if rect.x1 < max_x1_left_col
-                    ]
-
-            if other_caption_rects:
-                lowest_caption = max(other_caption_rects, key=lambda x: x.y1)
-                upper_bound_candidates.append(lowest_caption)
-
-            upper_bound_candidates.append(self.header_rect)
-            upper_bound_candidates.extend(
-                [
-                    figure.rect
-                    for figure in side_capt_figures
-                    if figure.rect.y1 < caption.rect.y0
-                ]
-            )
-
-            if upper_bound_candidates:
-                lowest_bounding_rect = max(upper_bound_candidates, key=lambda x: x.y1)
-                figure_rect.y0 = lowest_bounding_rect.y1
-
-            # Side boundaries
-            if self.columns_number > 1:
-                if self.columns_number > 2:
-                    warn(
-                        f"Document {page.parent} page {page.number} has more than 2 columns. "
-                        "Only 2 columns are supported for figure extraction."
-                    )
-                    result.extend(side_capt_figures)
-                    return tuple(result)
-
-                paragraph_rects = self.get_paragraph_rects(page_no, copy_rects=False)
-                left_columns_x1 = [
-                    rect.x1 for rect in paragraph_rects if rect.x1 < max_x1_left_col
-                ]
-                right_columns_x0 = [
-                    rect.x0 for rect in paragraph_rects if rect.x0 > min_x0_right_col
-                ]
-
-                # Left boundary for figure in right column
-                if caption.rect.x0 > min_x0_right_col:
-                    # First try to set it slightly to the right from the most right
-                    # position of the left column. But left column could be missing
-                    if left_columns_x1:
-                        figure_rect.x0 = max(left_columns_x1) + self.MARGIN
-                    elif right_columns_x0:
-                        figure_rect.x0 = max(right_columns_x0) - self.MARGIN
-
-                # Right boundary for figure in left column
-                if caption.rect.x1 < max_x1_left_col:
-                    if right_columns_x0:
-                        figure_rect.x1 = min(right_columns_x0) - self.MARGIN
-                    elif left_columns_x1:
-                        figure_rect.x1 = min(left_columns_x1) + self.MARGIN
+            # A figure narrowed to one column that nevertheless holds an element
+            # running across the gutter spans both columns after all — its caption
+            # was merely too short to say so. Bound it again as a full-width
+            # figure, so that its upper bound clears the paragraphs of both
+            # columns rather than of one.
+            if gutter is not None and self._crosses_column_gutter(
+                page_no, figure_rect, gutter
+            ):
+                figure_rect, _ = self._bound_figure_rect(
+                    page_no, caption, side_capt_figures, full_width=True
+                )
 
             result.append(FigurePDF(figure_rect, caption))
         result.extend(side_capt_figures)
         for i in range(len(result)):
             result[i].rect = self._refine_figure_rect(page_no, result[i].rect)
         return tuple(result)
+
+    def _bound_figure_rect(
+        self,
+        page_no: int,
+        caption: FigureCaptionPDF,
+        side_capt_figures: Sequence[FigurePDF],
+        full_width: bool,
+    ) -> tuple[Rect, tuple[float, float] | None]:
+        """
+        Bound the figure belonging to one caption.
+
+        Parameters
+        ----------
+        page_no : int
+            Page number (0-indexed) the caption sits on.
+        caption : FigureCaptionPDF
+            Caption of the figure to bound.
+        side_capt_figures : Sequence[FigurePDF]
+            Figures on the page whose captions sit beside them, already bounded.
+            They take part as upper-bound candidates.
+        full_width : bool
+            Bound the figure as spanning every column: neither the upper bound
+            nor the sides are restricted to the caption's own column.
+
+        Returns
+        -------
+        tuple[Rect, tuple[float, float] | None]
+            The figure rectangle, and the gutter the sides were narrowed to as
+            `(right edge of the left column, left edge of the right column)`.
+            The gutter is None whenever the sides were left alone — a
+            single-column document, `full_width`, a caption spanning both
+            columns, or a page carrying only one column of paragraphs.
+        """
+
+        page = self.file[page_no]
+        page_width = page.rect.width
+        figure_rect = cast(Rect, copy(page.rect))
+        figure_rect.x0, figure_rect.x1 = self._line_number_gutter(page_no)
+
+        # Lower boundary
+        figure_rect.y1 = caption.rect.y0
+
+        # Upper boundary
+        upper_bound_candidates: list[Rect] = []
+        paragraphs_above = self.get_paragraph_rects(page_no=page_no, clip=figure_rect)
+
+        # Columns could be shifted horizontaly so that the right boundary of
+        # the left column can be located more to the right than half of page width
+        # and vice versa
+        min_x0_right_col = page_width * 0.4
+        max_x1_left_col = page_width * 0.6
+        in_left_column = caption.rect.x1 < max_x1_left_col
+        in_right_column = caption.rect.x0 > min_x0_right_col
+        by_column = self.columns_number > 1 and not full_width
+
+        # if we have two column layout we need to check if figure is
+        # located in particular column and if so, check only paragraphs
+        # in that column
+        if by_column:
+            # figure is in right column
+            if in_right_column:
+                paragraphs_above = [
+                    rect for rect in paragraphs_above if rect.x0 > min_x0_right_col
+                ]
+            # Figure is in left column
+            if in_left_column:
+                paragraphs_above = [
+                    rect for rect in paragraphs_above if rect.x1 < max_x1_left_col
+                ]
+
+        if paragraphs_above:
+            lowest_paragraph = max(paragraphs_above, key=lambda x: x.y1)
+            upper_bound_candidates.append(lowest_paragraph)
+
+        # Search for figure caption above
+        other_caption_rects = self.get_figure_caption_rects(page_no, clip=figure_rect)
+        if by_column:
+            # If figure is in right column, then we don't care
+            # about other figures in left column
+            if in_right_column:
+                other_caption_rects = [
+                    rect for rect in other_caption_rects if rect.x0 > min_x0_right_col
+                ]
+            # Figure is in left column, then we don't care
+            # about other figures
+            elif in_left_column:
+                other_caption_rects = [
+                    rect for rect in other_caption_rects if rect.x1 < max_x1_left_col
+                ]
+
+        if other_caption_rects:
+            lowest_caption = max(other_caption_rects, key=lambda x: x.y1)
+            upper_bound_candidates.append(lowest_caption)
+
+        upper_bound_candidates.append(self.header_rect)
+        upper_bound_candidates.extend(
+            [
+                figure.rect
+                for figure in side_capt_figures
+                if figure.rect.y1 < caption.rect.y0
+            ]
+        )
+
+        if upper_bound_candidates:
+            lowest_bounding_rect = max(upper_bound_candidates, key=lambda x: x.y1)
+            figure_rect.y0 = lowest_bounding_rect.y1
+
+        # Side boundaries
+        gutter: tuple[float, float] | None = None
+        if by_column:
+            paragraph_rects = self.get_paragraph_rects(page_no, copy_rects=False)
+            left_columns_x1 = [
+                rect.x1 for rect in paragraph_rects if rect.x1 < max_x1_left_col
+            ]
+            right_columns_x0 = [
+                rect.x0 for rect in paragraph_rects if rect.x0 > min_x0_right_col
+            ]
+            narrowed = False
+
+            # Left boundary for figure in right column
+            if in_right_column:
+                # First try to set it slightly to the right from the most right
+                # position of the left column. But left column could be missing
+                if left_columns_x1:
+                    figure_rect.x0 = max(left_columns_x1) + self.MARGIN
+                    narrowed = True
+                elif right_columns_x0:
+                    figure_rect.x0 = max(right_columns_x0) - self.MARGIN
+                    narrowed = True
+
+            # Right boundary for figure in left column
+            if in_left_column:
+                if right_columns_x0:
+                    figure_rect.x1 = min(right_columns_x0) - self.MARGIN
+                    narrowed = True
+                elif left_columns_x1:
+                    figure_rect.x1 = min(left_columns_x1) + self.MARGIN
+                    narrowed = True
+
+            if narrowed and left_columns_x1 and right_columns_x0:
+                gutter = (max(left_columns_x1), min(right_columns_x0))
+
+        return figure_rect, gutter
+
+    def _crosses_column_gutter(
+        self,
+        page_no: int,
+        figure_rect: Rect,
+        gutter: tuple[float, float],
+    ) -> bool:
+        """
+        Check whether anything beside the figure runs across the column gutter.
+
+        The gutter is measured from the paragraphs themselves rather than taken
+        as a fraction of the page: the thresholds separating the columns leave a
+        fifth of the page between them, and a narrow element parked in that band
+        — a panel letter, the rule under it — sits in one column while reading as
+        if it spanned both.
+
+        Parameters
+        ----------
+        page_no : int
+            Page number (0-indexed).
+        figure_rect : Rect
+            Figure rectangle, narrowed to its column. Only its vertical span is
+            used: the element that gives the figure away lies outside its sides,
+            which is why it was not caught when the sides were set.
+        gutter : tuple[float, float]
+            Right edge of the left column and left edge of the right column.
+
+        Returns
+        -------
+        bool
+            True if an element of the page crosses the gutter within the
+            figure's vertical span.
+        """
+
+        gutter_left, gutter_right = gutter
+        for rect in chain(
+            self.get_text_rects(page_no, copy_rects=False),
+            self.get_drawing_rects(page_no, copy_rects=False),
+            self.get_image_rects(page_no, copy_rects=False),
+        ):
+            if rect.y1 <= figure_rect.y0 or rect.y0 >= figure_rect.y1:
+                continue
+            # Page furniture crosses the gutter by construction: a running head
+            # is one block the width of the text area, and it reaches below
+            # `header_rect`, which is a band of the page rather than the block.
+            if rect.intersects(self.header_rect) or rect.intersects(self.footer_rect):
+                continue
+            if self._rect_key(rect) in self._running_matter_rects:
+                continue
+            if rect.x0 < gutter_left and rect.x1 > gutter_right:
+                return True
+        return False
 
     def _refine_figure_rect(
         self,
