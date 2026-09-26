@@ -113,7 +113,7 @@
         "1": "AFM image of isolated laser-ablated particles on graphite (HOPG) substrate.",
         "2": "SEM images of Si-based \ufb01lms fabricated under different pressures of ambient helium: (a) 1, (b) 2, (c) 4, and (d) 8 Torr.",
         "3": "TEM micrograph image and corresponding size distribution of silver nanoparticles prepared by the femtosecond laser ablation in pure deionized water.",
-        "4": "TEM micrograph images and corresponding size distributions of gold particles prepared by the fs laser ablation in 0.01 M",
+        "4": "TEM micrograph images and corresponding size distributions of gold particles prepared by the fs laser ablation in 0.01 M \u03b2 -CD.",
         "5": "(a) SEM image of a Zn target after the multi-pulse breakdown productions; (b) Typical photoluminescence spectra from the ZnO layers produced by laser-induced breakdown processing of Zn in air at different \ufb02uences."
     },
     "dependence of properties of zirconium nitride nanoparticles prepared by laser ablation in liquids on synthesis parameters.pdf": {
@@ -318,5 +318,14 @@
     },
     "nuclear nanomedicine using si nanoparticles as safe and effective carriers of 188re radionuclide for cancer therapy_si.pdf": {
         "S1": "(a) Dynamics of conjugation of 188 Re with the Si*NPs-PEG complex during 48 hours; (b) Temporal stability of the 188 Re-based nano-conjugates on Whatman paper after washing out the unconjugated 188 Re eluate"
+    },
+    "transition metal dichalcogenide nanospheres for high-refractive-index nanophotonics and biomedical theranostics_si.pdf": {
+        "S1": "Real (\u03b5 1) and imaginary (\u03b5 2) parts of the dielectric function along the ab -plane and c -axis.",
+        "S2": "a SEM image of laser-ablated WS 2 NPs selected from a colloidal solution at 250 rpm. b SAED pattern for laser-ablated WS 2 NPs. TEM images for WS 2 NPs with a diameter of c 30 nm and d 40 nm. Yellow lines emphasize crystal planes.",
+        "S3": "Resonant Raman scattering spectra of laser-ablated WS 2 NPs separated by centrifugation at different rotation speed: 250, 500, 1000, 2000, and 4000 rpm, corresponding to d av = 87, 74, 58, 44, 40, and 33 nm, respectively. For comparison, we included Raman scattering spectra of original bulk WS 2 crystal with hexagonal 2H symmetry. The excitation wavelength is 532 nm.",
+        "S4": "Extinction cross-section of colloidal WS 2 NPs selected at the different rotation speeds of the centrifuge 250, 500, 1000, 2000, and 4000 rpm, corresponding to d av = 87, 74, 58, 44, 40, and 33 nm, respectively. Solid and dashed lines show experimental and calculated data correspondingly.",
+        "S5": "Multipole decomposition of extinction cross-section of TMDC NPs. For a-b 50 nm, c-d 100 nm, and e-f 150 nm diameters.",
+        "S6": "Raman and photothermal responses of WS 2 NPs. Raman spectra of WS 2 NPs with an average size of 65 nm on glass substrate were recorded under different laser excitation power and at two laser wavelengths: a 532 nm and b 633 nm correspondingly. c Temperature shift of the frequencies corresponding to \ud835\udc38 2\ud835\udc54 1 and \ud835\udc34 1\ud835\udc54 Raman scattering modes of WS 2 NPs with an average size of 65 nm on a glass substrate for two laser wavelengths \u03bb exc = 532 nm and \u03bb exc = 633 nm. d Dependence of WS 2 NPs local temperature on the power of exciting radiation for \u03bb exc = 532 nm and \u03bb exc = 633 nm.",
+        "S7": "Temperature shift of the frequencies corresponding to \ud835\udc38 2\ud835\udc54 1 and \ud835\udc34 1\ud835\udc54 Raman scattering modes of WS 2 and MoS2 NPs with an average size of 65 nm in comparison with unpatterned crystals on a glass substrate for two laser wavelengths \u03bb exc = 532 nm and \u03bb exc = 633 nm."
     }
 }

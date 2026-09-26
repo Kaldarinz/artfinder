@@ -15,6 +15,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from copy import copy, deepcopy
+from dataclasses import replace
 from functools import cached_property
 from itertools import chain
 from math import floor, inf
@@ -2610,6 +2611,10 @@ class ArticlePDF:
                         caption_pitch = (
                             block.lines[-1].rect.y1 - block.lines[-2].rect.y1
                         )
+                    # The next line is measured from the last full line of the
+                    # caption, not from the last line joined: that can be the
+                    # tail of a line, raised above it by a superscript.
+                    last_rect = block.lines[-1].rect
                     i += 1
                     while i < num_blocks:
                         next_block = text_blocks[i]
@@ -2618,7 +2623,46 @@ class ArticlePDF:
                         lines_consumed = 0
                         for j in range(len(next_block.lines)):
                             next_line = next_block.lines[j]
-                            last_rect = block.lines[-1].rect
+                            # The tail of the last line, split off into a block
+                            # of its own: a symbol or equation font breaks a line
+                            # at a Greek letter or a superscript (the β of β-CD,
+                            # the 1 of E¹₂g), possibly more than once. It sits on
+                            # the same line and starts where the line so far
+                            # ends — the line of the other column starts past a
+                            # gutter. It is merged into that line rather than
+                            # added as a line of its own, which would make a
+                            # one-line caption pass for a multiline side caption.
+                            line_so_far = block.lines[-1]
+                            same_line = min(
+                                next_line.rect.y1, last_rect.y1
+                            ) - max(next_line.rect.y0, last_rect.y0) > 0.5 * min(
+                                next_line.rect.height, last_rect.height
+                            )
+                            if (
+                                same_line
+                                and next_line.rect.x0
+                                <= line_so_far.rect.x1 + vertical_thr
+                                and next_line.rect.x1 > line_so_far.rect.x1
+                            ):
+                                line_rect = Rect(line_so_far.rect)
+                                line_rect.include_rect(next_line.rect)
+                                block_rect = Rect(block.rect)
+                                block_rect.include_rect(next_line.rect)
+                                block = TextBlockPDF(
+                                    rect=block_rect,
+                                    lines=block.lines[:-1]
+                                    + [
+                                        replace(
+                                            line_so_far,
+                                            rect=line_rect,
+                                            spans=line_so_far.spans
+                                            + next_line.spans,
+                                        )
+                                    ],
+                                )
+                                capture_extended = True
+                                lines_consumed += 1
+                                continue
                             gap = next_line.rect.y1 - last_rect.y1
                             # Beneath the caption, and one pitch below or
                             # single-spaced: a caption is often set single-spaced
@@ -2647,6 +2691,7 @@ class ArticlePDF:
                             ) > max(next_line.rect.x0, last_rect.x0):
                                 caption_pitch = gap
                                 block = block + next_line
+                                last_rect = next_line.rect
                                 capture_extended = True
                                 lines_consumed += 1
                             else:
@@ -2785,9 +2830,13 @@ class ArticlePDF:
         """
         Internal method to tell whether a block is set in the body font.
 
-        A block qualifies if every span is in the body family, in any cut, and
-        no smaller than the body size: a heading is set larger or bold, and still
-        reads as document text.
+        A block qualifies if most of it is set in the body family, in any cut,
+        and no smaller than the body size: a heading is set larger or bold, and
+        still reads as document text. The block is judged by the font most of it
+        is set in, not by every span — the subscript of a chemical formula
+        (`WS₂`) is set smaller, and a title merged into the block of the heading
+        beneath it may be set in a typeface of its own, and neither makes the
+        heading any less a heading.
 
         Parameters
         ----------
@@ -2801,11 +2850,11 @@ class ArticlePDF:
         """
 
         family, size = self.body_font
-        spans = [span for line in block.lines for span in line.spans if span.text.strip()]
-        return bool(spans) and all(
-            self._font_family(span.font) == family
-            and span.size >= size - self.FONT_SIZE_TOLERANCE
-            for span in spans
+        block_font = self._block_font(block)
+        return (
+            block_font is not None
+            and block_font[0] == family
+            and block_font[1] >= size - self.FONT_SIZE_TOLERANCE
         )
 
     @staticmethod
