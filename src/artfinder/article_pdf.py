@@ -2158,6 +2158,12 @@ class ArticlePDF:
         the tables to have been found first — which would be circular, since
         finding them uses this width.
 
+        Only horizontal text takes part — within a few degrees, as a scanned
+        page is often slightly skewed. A publisher's download stamp printed
+        up the page margin ("Downloaded from pubs.acs.org/...") is a block of
+        the same few points' width on every page; on a short document it
+        outweighs the body text and becomes the "paragraph" width.
+
         Parameters
         ----------
         eps : float
@@ -2177,6 +2183,7 @@ class ArticlePDF:
             for page_no in range(self.file.page_count)
             for block in self._text_cache[page_no]
             if self._is_prose(block)
+            and all(line.dir[0] > 0.99 for line in block.lines)
         ]
         if not rects:
             logger.debug(

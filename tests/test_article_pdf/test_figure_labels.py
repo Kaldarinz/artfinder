@@ -392,3 +392,19 @@ class TestSupplementaryFixtures:
         with ArticlePDF(pdf) as article:
             assert article.columns_number == 2
             assert set(article.figures) == {f"S{i}" for i in range(1, 8)}
+
+    def test_publisher_download_stamp_is_not_a_paragraph(self) -> None:
+        """Test the same supplementary file as downloaded from the publisher.
+
+        The download adds a stamp printed up the right margin of every page, a
+        text block a few points wide; counted as prose it outweighed the body
+        text and became the paragraph width, and no figure was found.
+        """
+
+        stamped = (
+            TEST_PDFS_DIR
+            / "tunable nanostructuring for van der waals materials_si_watermarked.pdf"
+        )
+        with ArticlePDF(LINE_NUMBERED_PDF) as clean, ArticlePDF(stamped) as article:
+            assert article.paragraph_width == clean.paragraph_width
+            assert set(article.figures) == {f"S{i}" for i in range(1, 6)}

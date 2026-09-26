@@ -304,5 +304,12 @@
     },
     "laser-ablative synthesis of isotope-enriched samarium oxide nanoparticles for nuclear nanomedicine_si.pdf": {
         "S1": "Size histograms of spherical fraction of Sm oxide NPs, obtained by laser ablation at (a) 10 \u00b5J, (b) 20 \u00b5J, (c) 50 \u00b5J and (d) 100 \u00b5J laser energies. The second mode of large NPs could be seen on size distribution at (a) 50 nm, (b) 65 nm, (c) 145 nm and (d) 210 nm."
+    },
+    "tunable nanostructuring for van der waals materials_si_watermarked.pdf": {
+        "S1": "Three-dimensional representation of the crystal structure of vdW materials, pictures of initial crystals/powders/solutions, and TEM image of laser-synthesized vdW NPs divided into different material families (TMDCs: Sulfides, Selenides, Tellurides, Janus, M(A)Xenes, Others).",
+        "S2": "Dependence of (a) size, (b) optical, and (c) compositional properties of MoS 2, WS 2, and Ti 3 C 2 NPs on liquid type, respectively. (d) Zeta-potential distribution of various laser-synthesized vdW NPs, confirming high colloidal stability.",
+        "S3": "The atomic structure of MoS 2 polycrystalline NP for various temperatures generated in MD.",
+        "S4": "MD calculated dependence of the fraction of all atoms in the NP shell on (a) the average size of the inner crystallite and (b) the cooling rate.",
+        "S5": "Comparison of elastic properties between MoS 2 and WS 2. (a) Top: TEM images of spherical MoS 2 and polygonal WS 2 nanoparticles. Bottom: relaxed multilayer structures with three-shell and three-core crystalline models, and the cylindrical deformation model. (b) Bending modulus and critical angle analysis for single-layer MoS 2 and WS 2."
     }
 }
