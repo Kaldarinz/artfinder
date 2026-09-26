@@ -252,15 +252,15 @@
         "S13": "Calculated absorption cross-section of 20 nm ZrN and TiN-based core@shell nanoparticles."
     },
     "laser fragmentation of colloidal gold nanoparticles with high-intensity nanosecond pulses_si.pdf": {
-        "S1": "Relative mass distribution of gold nanoparticles after LAL and fractionated",
+        "S1": "Relative mass distribution of gold nanoparticles after LAL and fractionated centrifugation. Measured using ADC.",
         "S2": "Schematic diagram of fluid dynamic observation of the free liquid jet",
-        "S3": "Absorption cross section of gold nanoparticles of different sizes, calculated using",
+        "S3": "Absorption cross section of gold nanoparticles of different sizes, calculated using MiePlot [1]. The absorption cross section depends on the excitation wavelength. In the calculations, we used optical data according to Johnson and Christy [2].",
         "S4": "Comparison of size distributions obtained from TEM, AUC, and ADC",
-        "S5": "Mass-specific thermal energy (left axis) absorbed by the AuNP during laser",
-        "S6": "Absorbance spectra (before and after LFL) in relation to the educt particle size:",
-        "S7": "TEM Images after LFL with 1\u20134 pulses per volume (PPV). A) 1 PPV, B) 2 PPVs,",
-        "S8": "Comparative UV/Vis-spectra of particles synthesized with a different number of",
-        "S9": "Size distribution plot of AuNPs after 1 to 4 PPVs in water in the presence of different",
+        "S5": "Mass-specific thermal energy (left axis) absorbed by the AuNP during laser irradiation, as calculated from the virtual temperature increase (right axis) determined by the MATLAB scrip-t from ref. [5]. Data refers to the center of a gold nanoparticle, calculated for single-pulse experiments with the lasers used in this study.",
+        "S6": "Absorbance spectra (before and after LFL) in relation to the educt particle size: A) 13 nm, B) 19 nm, C) 25 nm, D) 40 nm, E) 53 nm, and F) 67 nm.",
+        "S7": "TEM Images after LFL with 1\u20134 pulses per volume (PPV). A) 1 PPV, B) 2 PPVs, C) 3 PPVs, and D) 4 PPVs",
+        "S8": "Comparative UV/Vis-spectra of particles synthesized with a different number of PPVs. The spectra show a gradual blue shift and decrease in surface plasmon resonance (SPR) peak intensity, which confirms the smaller particle formation from 0 to 4 PPVs",
+        "S9": "Size distribution plot of AuNPs after 1 to 4 PPVs in water in the presence of different concentrations of NaCl (recorded after 24 h). The NaCl concentrations ranged from 0.0 M to 1.25 M, as illustrated in the legend.",
         "S10": "Long-term stability of the laser power for \u2018ns-high-RR.\u2019",
         "S11": "TEM Images after fragmentation in regimes 1 (A) and 2 (B)."
     },
@@ -273,9 +273,9 @@
     },
     "boron nanoparticle-enhanced proton therapy for cancer treatment_si.pdf": {
         "S1": "Cell viability via MTT assay after 24, 48 and 72 hours of incubation with boron nanoparticles.",
-        "S2": "Analysis of cell morphology, apoptosis and Live/Dead assay 24 hours after incubation with boron nano-",
+        "S2": "Analysis of cell morphology, apoptosis and Live/Dead assay 24 hours after incubation with boron nanoparticles. Scale bar\u2014100 \u00b5m",
         "S3": "Clonogenic assay after 24, 48 and 72 hours of incubation with boron nanoparticles. Scale bar\u20141 mm",
-        "S4": "Scheme of irradiation of culture flasks (a, b) and dose distribution in the module for calculating the irra-",
+        "S4": "Scheme of irradiation of culture flasks (a, b) and dose distribution in the module for calculating the irradiation zone with a graph of dose distribution along the central horizontal and vertical axes (c).",
         "S5": "Dose-dependent response of clonogenic activity after proton beam irradiation in the Bragg peak."
     },
     "laser-synthesized plasmonic hfn-based nanoparticles as a novel multifunctional agent for photothermal therapy_si.pdf": {

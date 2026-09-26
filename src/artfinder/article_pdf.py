@@ -300,29 +300,45 @@ class ArticlePDF:
         """
         Distance between the baselines of consecutive text lines.
 
-        Measured as the median distance inside multi-line text blocks, so it
+        Measured as the median distance between consecutive lines, so it
         reflects the leading the document is actually set with. This is not the
         same as the height of a line: a manuscript set with extra leading spaces
         its lines further apart than their glyphs are tall, and a caption
         continued on the next line is then not one line height below its
         predecessor but one pitch.
 
+        Lines are paired inside a text block and also across consecutive
+        blocks that overlap horizontally. The second is what measures a
+        document exported from a word processor, which puts nearly every line
+        in a block of its own: counting only within blocks leaves it a sample
+        or two — a title over its subtitle — and a pitch far wider than the
+        leading, at which no caption's continuation line is recognized.
+
         Returns
         -------
         float
             Median distance between consecutive lines, in points. Falls back to
-            the median line height if the document has no multi-line block.
+            the median line height if the document has no two such lines.
         """
 
         gaps: list[float] = []
         heights: list[float] = []
+
+        def add_gap(line: TextLinePDF, next_line: TextLinePDF) -> None:
+            gap = next_line.rect.y1 - line.rect.y1
+            if 0 < gap < self.MAX_LINE_PITCH:
+                gaps.append(gap)
+
         for page_no in range(self.file.page_count):
-            for block in self._text_cache[page_no]:
+            blocks = self._text_cache[page_no]
+            for block in blocks:
                 heights.extend(line.rect.height for line in block.lines)
                 for line, next_line in zip(block.lines, block.lines[1:]):
-                    gap = next_line.rect.y1 - line.rect.y1
-                    if 0 < gap < self.MAX_LINE_PITCH:
-                        gaps.append(gap)
+                    add_gap(line, next_line)
+            for block, next_block in zip(blocks, blocks[1:]):
+                last, first = block.lines[-1].rect, next_block.lines[0].rect
+                if min(last.x1, first.x1) > max(last.x0, first.x0):
+                    add_gap(block.lines[-1], next_block.lines[0])
         if gaps:
             return median(gaps)
         return median(heights) if heights else 0.0
@@ -2483,15 +2499,20 @@ class ArticlePDF:
                         lines_consumed = 0
                         for j in range(len(next_block.lines)):
                             next_line = next_block.lines[j]
-                            if (
-                                abs(
-                                    next_line.rect.y1
-                                    - block.lines[-1].rect.y1
-                                    - self.line_pitch
-                                )
-                                < max(
-                                    vertical_thr,
-                                    self.LINE_PITCH_TOLERANCE * self.line_pitch,
+                            last_rect = block.lines[-1].rect
+                            gap = next_line.rect.y1 - last_rect.y1
+                            # Beneath the caption, and one pitch below or one
+                            # line height below: a caption is often set
+                            # single-spaced under a body set at one and a half
+                            # or double spacing.
+                            if min(next_line.rect.x1, last_rect.x1) > max(
+                                next_line.rect.x0, last_rect.x0
+                            ) and any(
+                                abs(gap - pitch)
+                                < max(vertical_thr, self.LINE_PITCH_TOLERANCE * pitch)
+                                for pitch in (
+                                    self.line_pitch,
+                                    last_rect.height,
                                 )
                             ):
                                 block = block + next_line
