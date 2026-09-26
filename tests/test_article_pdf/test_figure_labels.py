@@ -49,6 +49,8 @@ class TestCaptionLabel:
             ("Supplementary Fig. S3 Cell viability.", "S3"),
             ("Supplemental Figure 2. Photographs of solutions.", "S2"),
             ("Supporting Figure 2. Photographs of solutions.", "S2"),
+            ("Figure 1S. (a) Dynamics of conjugation.", "S1"),
+            ("Fig. 12S: Size distributions.", "S12"),
         ],
     )
     def test_label_of_caption(self, caption: str, expected: str) -> None:
@@ -57,6 +59,21 @@ class TestCaptionLabel:
         match = ArticlePDF.CAPTION_PATTERN.match(caption)
         assert match is not None, f"Caption not recognized: {caption!r}"
         assert ArticlePDF._caption_label(match) == expected
+
+    @pytest.mark.parametrize(
+        ("caption", "expected"),
+        [
+            ("Figure 1. (a) Setup; (b) spectra.", "(a) Setup; (b) spectra."),
+            ("Figure 1S. (a) Dynamics.", "(a) Dynamics."),
+            ("Fig. 2 [Reprinted from ref. 5]", "[Reprinted from ref. 5]"),
+        ],
+    )
+    def test_opening_bracket_is_kept(self, caption: str, expected: str) -> None:
+        """Test that the caption pattern stops short of a bracket opening the text."""
+
+        match = ArticlePDF.CAPTION_PATTERN.match(caption)
+        assert match is not None, f"Caption not recognized: {caption!r}"
+        assert caption[match.end() :] == expected
 
     @pytest.mark.parametrize(
         "text",

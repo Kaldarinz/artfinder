@@ -17,7 +17,7 @@ from collections.abc import Iterable, Sequence
 from copy import copy, deepcopy
 from functools import cached_property
 from itertools import chain
-from math import floor
+from math import floor, inf
 from statistics import median
 from os import PathLike
 from pathlib import Path
@@ -105,19 +105,27 @@ class ArticlePDF:
     """How far the distance between two lines may differ from `line_pitch` or
     `paragraph_pitch`, as a fraction of it, for them to still be consecutive lines
     of one caption or paragraph."""
+    MAX_SINGLE_SPACING = 1.3
+    """Largest distance between consecutive lines of a single-spaced caption, as
+    a multiple of the height of a line. Line boxes are shorter than the leading
+    they are set at: 12 pt Times single-spaced by a word processor puts lines of
+    13.5 pt 16 pt apart."""
+    MIN_FIGURE_IMAGE_OVERLAP = 0.9
+    """Fraction of an image reaching above the bounds of a figure that must lie
+    within them for the image to be part of the figure."""
     DOI_PATTERN = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
     "Pattern of a DOI in text. The prefix dot is literal: `1000/x` is not a DOI."
     CAPTION_PATTERN = re.compile(
         r"^\s*(?:(?P<supp>supplementary|supplemental|supporting)\s+)?"
-        r"Fig(?:\.|ure\.?|)\s+(?:(?P<prefix>S)\s?)?(?P<number>\d+)\W*",
+        r"Fig(?:\.|ure\.?|)\s+(?:(?P<prefix>S)\s?)?(?P<number>\d+)(?P<suffix>S)?[^\w(\[]*",
         re.IGNORECASE,
     )
-    """Pattern of a figure caption opening, e.g. `Fig. 1`, `Figure S2.` or
-    `Supplementary Figure 3`. The `supp` and `prefix` groups mark a
-    supplementary figure, the `number` group holds its digits."""
+    """Pattern of a figure caption opening, e.g. `Fig. 1`, `Figure S2.`,
+    `Figure 2S.` or `Supplementary Figure 3`. The `supp`, `prefix` and `suffix`
+    groups mark a supplementary figure, the `number` group holds its digits."""
     TABLE_CAPTION_PATTERN = re.compile(
         r"^\s*(?:(?P<supp>supplementary|supplemental|supporting)\s+)?"
-        r"Table\s+(?:(?P<prefix>S)\s?)?(?P<number>\d+)\W*",
+        r"Table\s+(?:(?P<prefix>S)\s?)?(?P<number>\d+)(?P<suffix>S)?[^\w(\[]*",
         re.IGNORECASE,
     )
     """Pattern of a table caption opening, e.g. `Table 1.` or `Table S2.`, with
@@ -2342,7 +2350,8 @@ class ArticlePDF:
 
         The label is the figure number with leading zeros dropped, prefixed with
         `S` for a supplementary figure. Both spellings of "supplementary" mark
-        the same thing, so `Supplementary Fig. S1` is labelled `S1`, not `SS1`.
+        the same thing, so `Supplementary Fig. S1` is labelled `S1`, not `SS1`,
+        and `Figure 1S` — the `S` set after the number — is labelled `S1` too.
 
         Parameters
         ----------
@@ -2355,7 +2364,10 @@ class ArticlePDF:
             Figure label, e.g. `1` or `S1`.
         """
 
-        prefix = "S" if match.group("supp") or match.group("prefix") else ""
+        supplementary = (
+            match.group("supp") or match.group("prefix") or match.group("suffix")
+        )
+        prefix = "S" if supplementary else ""
         return f"{prefix}{int(match.group('number'))}"
 
     @staticmethod
@@ -2589,6 +2601,15 @@ class ArticlePDF:
 
                     # Case 3: caption split in several blocks. Check if the first line
                     # of the next block is one line down from the last line of current block.
+                    # Once two lines of the caption are known, their distance is
+                    # its leading, and a line set at any other is not part of
+                    # it: a single-spaced caption is followed by the paragraph
+                    # of a double-spaced body one `line_pitch` below.
+                    caption_pitch: float | None = None
+                    if len(block.lines) > 1:
+                        caption_pitch = (
+                            block.lines[-1].rect.y1 - block.lines[-2].rect.y1
+                        )
                     i += 1
                     while i < num_blocks:
                         next_block = text_blocks[i]
@@ -2599,20 +2620,32 @@ class ArticlePDF:
                             next_line = next_block.lines[j]
                             last_rect = block.lines[-1].rect
                             gap = next_line.rect.y1 - last_rect.y1
-                            # Beneath the caption, and one pitch below or one
-                            # line height below: a caption is often set
-                            # single-spaced under a body set at one and a half
-                            # or double spacing.
-                            if min(next_line.rect.x1, last_rect.x1) > max(
-                                next_line.rect.x0, last_rect.x0
-                            ) and any(
-                                abs(gap - pitch)
-                                < max(vertical_thr, self.LINE_PITCH_TOLERANCE * pitch)
-                                for pitch in (
-                                    self.line_pitch,
-                                    last_rect.height,
+                            # Beneath the caption, and one pitch below or
+                            # single-spaced: a caption is often set single-spaced
+                            # under a body set at one and a half or double
+                            # spacing, its lines anywhere from one line height
+                            # to `MAX_SINGLE_SPACING` line heights apart.
+                            height = last_rect.height
+                            if caption_pitch is not None:
+                                consecutive = abs(gap - caption_pitch) < max(
+                                    vertical_thr,
+                                    self.LINE_PITCH_TOLERANCE * caption_pitch,
                                 )
-                            ):
+                            else:
+                                consecutive = (
+                                    abs(gap - self.line_pitch)
+                                    < max(
+                                        vertical_thr,
+                                        self.LINE_PITCH_TOLERANCE * self.line_pitch,
+                                    )
+                                    or (1 - self.LINE_PITCH_TOLERANCE) * height
+                                    <= gap
+                                    <= self.MAX_SINGLE_SPACING * height
+                                )
+                            if consecutive and min(
+                                next_line.rect.x1, last_rect.x1
+                            ) > max(next_line.rect.x0, last_rect.x0):
+                                caption_pitch = gap
                                 block = block + next_line
                                 capture_extended = True
                                 lines_consumed += 1
@@ -3239,6 +3272,12 @@ class ArticlePDF:
         the nearest paragraph, failed to exclude. The labels of a figure are
         either set in a typeface of their own or sit among its graphics.
 
+        An image belongs to the figure when most of it lies within `figure_rect`
+        and only its top sticks out, not only when all of it does:
+        an image placed by a word processor can reach a few points up past the
+        heading above it, the bound the rectangle stops at, and would otherwise
+        be lost to the figure.
+
         Parameters
         ----------
         page_no : int
@@ -3253,13 +3292,22 @@ class ArticlePDF:
             itself if it holds none.
         """
 
-        graphics: list[Rect] = []
-        graphics.extend(
-            self.get_drawing_rects(page_no, clip=figure_rect, copy_rects=False)
-        )
-        graphics.extend(
-            self.get_image_rects(page_no, clip=figure_rect, copy_rects=False)
-        )
+        # An image may rise above the top of the figure, never cross its sides
+        # or its caption beneath. Drawings must lie wholly within: the rules of
+        # a frame or table around figure and caption alike are no part of it.
+        top_free_rect = Rect(figure_rect.x0, -inf, figure_rect.x1, figure_rect.y1)
+        graphics = self.get_drawing_rects(page_no, clip=figure_rect, copy_rects=False)
+        graphics += [
+            rect
+            for rect in self.get_image_rects(page_no, copy_rects=False)
+            if figure_rect.contains(rect)
+            or (
+                top_free_rect.contains(rect)
+                and not rect.is_empty
+                and Rect(rect).intersect(figure_rect).get_area() / rect.get_area()
+                >= self.MIN_FIGURE_IMAGE_OVERLAP
+            )
+        ]
         graphics_top = min((rect.y0 for rect in graphics), default=figure_rect.y1)
 
         rects: list[Rect] = list(graphics)
