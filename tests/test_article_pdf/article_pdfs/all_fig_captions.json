@@ -311,5 +311,9 @@
         "S3": "The atomic structure of MoS 2 polycrystalline NP for various temperatures generated in MD.",
         "S4": "MD calculated dependence of the fraction of all atoms in the NP shell on (a) the average size of the inner crystallite and (b) the cooling rate.",
         "S5": "Comparison of elastic properties between MoS 2 and WS 2. (a) Top: TEM images of spherical MoS 2 and polygonal WS 2 nanoparticles. Bottom: relaxed multilayer structures with three-shell and three-core crystalline models, and the cylindrical deformation model. (b) Bending modulus and critical angle analysis for single-layer MoS 2 and WS 2."
+    },
+    "femtosecond laser ablation and fragmentation for tmdc nanoparticles synthesis_ a comparative study_si.pdf": {
+        "S1": "SEM photographs of laser-induced periodic structures (LIPS), appeared after multiple passes of WSe 2 crystal surface by femtosecond pulses during ablation experiments; a) Elongated wire-like pattern; b) A magnified area from a), showing the underformed wires pattern; c) Another surface area with low-spatial frequency wavy grooves and high-spatial frequency sphericallike beads.",
+        "S2": "TEM photographs of colloids after different time of femtosecond laser fragmentation. At times 5 min and more, Se NPs appear."
     }
 }

@@ -102,8 +102,9 @@ class ArticlePDF:
     """Fraction of a trailing line that must sit within the horizontal span of a
     paragraph for the line to belong to it."""
     LINE_PITCH_TOLERANCE = 0.15
-    """How far the distance between two lines may differ from `line_pitch`, as a
-    fraction of it, for them to still be consecutive lines of one caption."""
+    """How far the distance between two lines may differ from `line_pitch` or
+    `paragraph_pitch`, as a fraction of it, for them to still be consecutive lines
+    of one caption or paragraph."""
     DOI_PATTERN = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
     "Pattern of a DOI in text. The prefix dot is literal: `1000/x` is not a DOI."
     CAPTION_PATTERN = re.compile(
@@ -130,6 +131,12 @@ class ArticlePDF:
     MAX_TABLE_CELL_CHARS = 30
     """Longest median line, in characters, for a block to read as table cells
     rather than as running text."""
+    FONT_STYLE_PATTERN = re.compile(r"(?:ps)?(?:mt)?(?:[-,].*)?$")
+    """Pattern of what follows a font's family in its name: a style after a dash
+    or a comma (`Arial-BoldMT`, `Arial,Italic`) or a vendor suffix
+    (`TimesNewRomanPSMT`). Matched against the lowercased name."""
+    FONT_SIZE_TOLERANCE = 0.5
+    "How far, in points, a font size may fall below the body size and still count as it."
     LINE_NUMBER_PATTERN = re.compile(r"^\d{1,4}$")
     """Pattern of a manuscript line number: a bare integer and nothing else on
     the line."""
@@ -342,6 +349,71 @@ class ArticlePDF:
         if gaps:
             return median(gaps)
         return median(heights) if heights else 0.0
+
+    @cached_property
+    def paragraph_pitch(self) -> float:
+        """
+        Distance between the baselines of consecutive lines of body paragraphs.
+
+        `line_pitch` is measured over all the text of a document, and in a
+        manuscript whose body is set at one and a half or double spacing the
+        single-spaced references, tables and affiliations outnumber it. The
+        leading of the body then differs from `line_pitch`, and the last line
+        of a paragraph, narrower than the body, is not recognized as following
+        it. Measuring over the lines of paragraph blocks alone gives the body's
+        own leading.
+
+        Lines are paired inside a block and across consecutive blocks that
+        overlap horizontally, as for `line_pitch`.
+
+        Returns
+        -------
+        float
+            Median distance between consecutive paragraph lines, in points.
+            Falls back to `line_pitch` if the document has no two such lines.
+        """
+
+        gaps: list[float] = []
+        for page_no in range(self.file.page_count):
+            lines = [
+                line
+                for block in self._text_cache[page_no]
+                if self._is_paragraph_block(block)
+                for line in block.lines
+            ]
+            for line, next_line in zip(lines, lines[1:]):
+                gap = next_line.rect.y1 - line.rect.y1
+                overlap = min(line.rect.x1, next_line.rect.x1) - max(
+                    line.rect.x0, next_line.rect.x0
+                )
+                if overlap > 0 and 0 < gap < self.MAX_LINE_PITCH:
+                    gaps.append(gap)
+        return median(gaps) if gaps else self.line_pitch
+
+    @cached_property
+    def body_font(self) -> tuple[str, float]:
+        """
+        Font family and size the most text of the document is set in.
+
+        The family is the one `_font_family` returns, so the bold and italic
+        cuts of the body typeface count towards it too.
+
+        Returns
+        -------
+        tuple[str, float]
+            Font family and size, rounded to a tenth of a point. An empty family
+            and a zero size if the document holds no text.
+        """
+
+        chars: Counter[tuple[str, float]] = Counter()
+        for page_no in range(self.file.page_count):
+            for block in self._text_cache[page_no]:
+                for line in block.lines:
+                    for span in line.spans:
+                        font = (self._font_family(span.font), round(span.size, 1))
+                        chars[font] += len(span.text.strip())
+        most_common = chars.most_common(1)
+        return most_common[0][0] if most_common else ("", 0.0)
 
     @cached_property
     def columns_number(self) -> int:
@@ -787,9 +859,11 @@ class ArticlePDF:
         they are seen as free-standing text and end up inside a figure that
         happens to sit under them.
 
-        A line joins the paragraph above when it follows one `line_pitch` below
-        it — the rule the captions are stitched by — and lies within its
-        horizontal span.
+        A line joins the paragraph above when it follows one `line_pitch` or one
+        `paragraph_pitch` below it — the second for a body set with more leading
+        than the rest of the document — lies within its horizontal span and is
+        set in the font of the paragraph. The font is what keeps out the labels
+        of a figure that happen to sit one pitch under the paragraph.
 
         A short document may have no body width to measure: a one-page
         supplementary file is a title, an author list and a stack of affiliations
@@ -812,37 +886,61 @@ class ArticlePDF:
         """
 
         blocks = self._text_cache[page_no]
-        if self.paragraph_width.mean > 0:
-            paragraphs = [
-                block
-                for block in blocks
-                if self.paragraph_width.min
-                <= block.rect.width
-                <= self.paragraph_width.max
-            ]
-        else:
-            paragraphs = [block for block in blocks if self._is_prose(block)]
+        paragraphs = [block for block in blocks if self._is_paragraph_block(block)]
         rects = [copy(block.rect) for block in paragraphs]
+        fonts = [self._block_font(block) for block in paragraphs]
         taken = {id(block) for block in paragraphs}
-        tolerance = max(1.0, self.LINE_PITCH_TOLERANCE * self.line_pitch)
+        pitches = {self.line_pitch, self.paragraph_pitch}
 
         extended = True
         while extended:
             extended = False
-            for rect in rects:
+            for rect, font in zip(rects, fonts):
                 for block in blocks:
                     if id(block) in taken or not block.lines:
                         continue
-                    first_line = block.lines[0].rect
-                    if abs(first_line.y1 - rect.y1 - self.line_pitch) > tolerance:
+                    gap = block.lines[0].rect.y1 - rect.y1
+                    if not any(
+                        abs(gap - pitch)
+                        <= max(1.0, self.LINE_PITCH_TOLERANCE * pitch)
+                        for pitch in pitches
+                    ):
                         continue
                     overlap = min(rect.x1, block.rect.x1) - max(rect.x0, block.rect.x0)
                     if overlap < self.MIN_PARAGRAPH_OVERLAP * block.rect.width:
+                        continue
+                    if not self._same_font(font, self._block_font(block)):
                         continue
                     rect.include_rect(block.rect)
                     taken.add(id(block))
                     extended = True
         return tuple(rects)
+
+    def _is_paragraph_block(self, block: TextBlockPDF) -> bool:
+        """
+        Internal method to tell whether a block seeds a body paragraph.
+
+        A block seeds one when it has the body width, or, in a document with no
+        body width to measure, when it reads as prose.
+
+        Parameters
+        ----------
+        block : TextBlockPDF
+            Block to classify.
+
+        Returns
+        -------
+        bool
+            Whether the block seeds a paragraph.
+        """
+
+        if self.paragraph_width.mean > 0:
+            return bool(
+                self.paragraph_width.min
+                <= block.rect.width
+                <= self.paragraph_width.max
+            )
+        return self._is_prose(block)
 
     def get_figure_rects(
         self,
@@ -2578,6 +2676,106 @@ class ArticlePDF:
         return result
 
     @staticmethod
+    def _font_family(font: str) -> str:
+        """
+        Internal method to reduce a font name to the family it belongs to.
+
+        Parameters
+        ----------
+        font : str
+            Font name as the PDF gives it, possibly with a subset prefix
+            (`ABCDEF+Arial-BoldMT`).
+
+        Returns
+        -------
+        str
+            Lowercased family name, e.g. `arial` or `timesnewroman`.
+        """
+
+        name = font.rsplit("+", 1)[-1].lower()
+        return ArticlePDF.FONT_STYLE_PATTERN.sub("", name, count=1)
+
+    @staticmethod
+    def _block_font(block: TextBlockPDF) -> tuple[str, float] | None:
+        """
+        Internal method to find the font most of a block is set in.
+
+        Parameters
+        ----------
+        block : TextBlockPDF
+            Block to measure.
+
+        Returns
+        -------
+        tuple[str, float] | None
+            Font family, as `_font_family` gives it, and size, or None for a
+            block with no visible text.
+        """
+
+        chars: Counter[tuple[str, float]] = Counter()
+        for line in block.lines:
+            for span in line.spans:
+                font = (ArticlePDF._font_family(span.font), round(span.size, 1))
+                chars[font] += len(span.text.strip())
+        most_common = chars.most_common(1)
+        if not most_common or most_common[0][1] == 0:
+            return None
+        return most_common[0][0]
+
+    @staticmethod
+    def _same_font(
+        font: tuple[str, float] | None, other: tuple[str, float] | None
+    ) -> bool:
+        """
+        Internal method to tell whether two fonts are the same, in any cut.
+
+        Parameters
+        ----------
+        font, other : tuple[str, float] | None
+            Font family and size, as `_block_font` gives them.
+
+        Returns
+        -------
+        bool
+            Whether both are known, of one family and of one size within
+            `FONT_SIZE_TOLERANCE`.
+        """
+
+        if font is None or other is None:
+            return False
+        return (
+            font[0] == other[0]
+            and abs(font[1] - other[1]) <= ArticlePDF.FONT_SIZE_TOLERANCE
+        )
+
+    def _is_body_text(self, block: TextBlockPDF) -> bool:
+        """
+        Internal method to tell whether a block is set in the body font.
+
+        A block qualifies if every span is in the body family, in any cut, and
+        no smaller than the body size: a heading is set larger or bold, and still
+        reads as document text.
+
+        Parameters
+        ----------
+        block : TextBlockPDF
+            Block to classify.
+
+        Returns
+        -------
+        bool
+            Whether the block is set in the body font.
+        """
+
+        family, size = self.body_font
+        spans = [span for line in block.lines for span in line.spans if span.text.strip()]
+        return bool(spans) and all(
+            self._font_family(span.font) == family
+            and span.size >= size - self.FONT_SIZE_TOLERANCE
+            for span in spans
+        )
+
+    @staticmethod
     def _is_prose(block: TextBlockPDF) -> bool:
         """
         Internal method to tell running text from the cells of a table.
@@ -3032,12 +3230,45 @@ class ArticlePDF:
         figure_rect: Rect,
     ) -> Rect:
 
-        rects: list[Rect] = []
-        rects.extend(self.get_text_rects(page_no, clip=figure_rect, copy_rects=False))
-        rects.extend(
+        """
+        Shrink a figure rectangle to the elements it holds.
+
+        Text set in the body font above every image and drawing of the figure is
+        left out: it is document text — a section heading or a short list with
+        no paragraph between it and the figure — that the upper bound, drawn at
+        the nearest paragraph, failed to exclude. The labels of a figure are
+        either set in a typeface of their own or sit among its graphics.
+
+        Parameters
+        ----------
+        page_no : int
+            Page number (0-indexed) the figure sits on.
+        figure_rect : Rect
+            Maximum bounds of the figure.
+
+        Returns
+        -------
+        Rect
+            The rectangle enclosing the elements of the figure, or `figure_rect`
+            itself if it holds none.
+        """
+
+        graphics: list[Rect] = []
+        graphics.extend(
             self.get_drawing_rects(page_no, clip=figure_rect, copy_rects=False)
         )
-        rects.extend(self.get_image_rects(page_no, clip=figure_rect, copy_rects=False))
+        graphics.extend(
+            self.get_image_rects(page_no, clip=figure_rect, copy_rects=False)
+        )
+        graphics_top = min((rect.y0 for rect in graphics), default=figure_rect.y1)
+
+        rects: list[Rect] = list(graphics)
+        for block in self._text_cache[page_no]:
+            if not figure_rect.contains(block.rect):
+                continue
+            if graphics and block.rect.y1 <= graphics_top and self._is_body_text(block):
+                continue
+            rects.append(block.rect)
         if not rects:
             return figure_rect
         refined_rect = copy(rects[0])
