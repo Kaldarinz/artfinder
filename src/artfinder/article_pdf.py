@@ -118,15 +118,17 @@ class ArticlePDF:
     "Pattern of a DOI in text. The prefix dot is literal: `1000/x` is not a DOI."
     CAPTION_PATTERN = re.compile(
         r"^\s*(?:(?P<supp>supplementary|supplemental|supporting)\s+)?"
-        r"Fig(?:\.|ure\.?|)\s+(?:(?P<prefix>S)\s?)?(?P<number>\d+)(?P<suffix>S)?[^\w(\[]*",
+        r"Fig(?:\.|ure\.?|)\s+(?:(?P<prefix>S)\s?)?(?P<number>\d+)(?P<suffix>S)?(?!\w)[^\w(\[]*",
         re.IGNORECASE,
     )
     """Pattern of a figure caption opening, e.g. `Fig. 1`, `Figure S2.`,
     `Figure 2S.` or `Supplementary Figure 3`. The `supp`, `prefix` and `suffix`
-    groups mark a supplementary figure, the `number` group holds its digits."""
+    groups mark a supplementary figure, the `number` group holds its digits.
+    A label run into a letter is not an opening: `Figure 1a shows` starts a
+    paragraph referring to a panel, set in the same font as a caption."""
     TABLE_CAPTION_PATTERN = re.compile(
         r"^\s*(?:(?P<supp>supplementary|supplemental|supporting)\s+)?"
-        r"Table\s+(?:(?P<prefix>S)\s?)?(?P<number>\d+)(?P<suffix>S)?[^\w(\[]*",
+        r"Table\s+(?:(?P<prefix>S)\s?)?(?P<number>\d+)(?P<suffix>S)?(?!\w)[^\w(\[]*",
         re.IGNORECASE,
     )
     """Pattern of a table caption opening, e.g. `Table 1.` or `Table S2.`, with

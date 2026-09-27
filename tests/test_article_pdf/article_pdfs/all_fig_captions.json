@@ -349,5 +349,10 @@
         "S3": "Determination of the quantum yield for laser ablated DCEtDCS FON using fluorescein as a standard reference. (a) The absorbances of fluorescein and laser ablated DCEtDCS FON (b) The measured PLQY of laser ablated DCEtDCS FON (57%) was determined relative to the standard reference fluorescein (PLQY: 95% in 0.1M aq. NaOH).",
         "S4": "Surface charge (zeta potential) of pristine and chitosan (Ch) modified AIE FON.",
         "S5": "AFM image and height distribution of chitosan modified DCEtDCS FONs."
+    },
+    "structural properties of gold-silicon nanohybrids formed by femtosecond laser ablation in water at different fluences.pdf": {
+        "1": "TEM images of bare Au NPs (a) and hybrid AuSi NPs (b) prepared by laser ablation under irradiation with laser energy of 175 \u00b5J/pulse. Dependence of average size (c) and size dispersion (d) of Au NPs and AuSi NPs on laser energy.",
+        "2": "EDX spectra of large (a) and small (b) hybrid AuSi NP",
+        "3": "Dependence of gold and silicon contribution of 15 nm AuSi NPs on applied laser fluence."
     }
 }
