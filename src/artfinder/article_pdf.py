@@ -3115,6 +3115,10 @@ class ArticlePDF:
             # skip side captions
             if self._is_side_caption(page_no, caption.rect):
                 continue
+            # The figure was printed at the foot of the previous page, and is
+            # bounded there.
+            if self._figure_rect_on_previous_page(page_no, caption) is not None:
+                continue
 
             if self.columns_number > 2:
                 warn(
@@ -3142,9 +3146,88 @@ class ArticlePDF:
 
             result.append(FigurePDF(figure_rect, caption))
         result.extend(side_capt_figures)
+        if page_no + 1 < self.file.page_count:
+            for caption in self._figure_captions_cache[page_no + 1]:
+                prev_page_rect = self._figure_rect_on_previous_page(
+                    page_no + 1, caption
+                )
+                if prev_page_rect is not None:
+                    result.append(FigurePDF(prev_page_rect, caption))
         for i in range(len(result)):
             result[i].rect = self._refine_figure_rect(page_no, result[i].rect)
         return tuple(result)
+
+    def _figure_rect_on_previous_page(
+        self,
+        page_no: int,
+        caption: FigureCaptionPDF,
+    ) -> Rect | None:
+        """
+        Bound the figure of a caption that opens its page, if it sits on the page before.
+
+        A word processor that cannot fit a figure together with its caption
+        leaves the figure at the foot of one page and carries the caption over
+        to the top of the next. Such a caption has nothing above it but the
+        running head, and the previous page ends in graphics below its last
+        paragraph or caption.
+
+        Parameters
+        ----------
+        page_no : int
+            Page number (0-indexed) the caption sits on.
+        caption : FigureCaptionPDF
+            Caption of the figure.
+
+        Returns
+        -------
+        Rect | None
+            Maximum bounds of the figure on page `page_no - 1`, or None if the
+            figure is on the caption's own page.
+        """
+
+        if page_no == 0 or self._is_side_caption(page_no, caption.rect):
+            return None
+
+        page_rect = cast(Rect, self.file[page_no].rect)  # type: ignore[attr-defined]
+        above_caption = Rect(
+            page_rect.x0, self.header_rect.y1, page_rect.x1, caption.rect.y0
+        )
+        for rect in chain(
+            self.get_text_rects(page_no, copy_rects=False),
+            self.get_drawing_rects(page_no, copy_rects=False),
+            self.get_image_rects(page_no, copy_rects=False),
+        ):
+            if above_caption.contains(rect) and (
+                self._rect_key(rect) not in self._running_matter_rects
+            ):
+                return None
+
+        prev_page_no = page_no - 1
+        figure_rect = copy(
+            cast(Rect, self.file[prev_page_no].rect)  # type: ignore[attr-defined]
+        )
+        figure_rect.x0, figure_rect.x1 = self._line_number_gutter(prev_page_no)
+        if not self.footer_rect.is_empty:
+            figure_rect.y1 = self.footer_rect.y0
+        figure_rect.y0 = max(
+            (
+                rect.y1
+                for rect in chain(
+                    [self.header_rect],
+                    self.get_paragraph_rects(prev_page_no, copy_rects=False),
+                    self.get_figure_caption_rects(prev_page_no, copy_rects=False),
+                    self.get_table_caption_rects(prev_page_no, copy_rects=False),
+                    self.get_table_rects(prev_page_no, copy_rects=False),
+                )
+            ),
+        )
+        if figure_rect.is_empty:
+            return None
+        if not self.get_drawing_rects(
+            prev_page_no, clip=figure_rect, copy_rects=False
+        ) and not self.get_image_rects(prev_page_no, clip=figure_rect, copy_rects=False):
+            return None
+        return figure_rect
 
     def _bound_figure_rect(
         self,

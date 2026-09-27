@@ -342,5 +342,12 @@
         "S6": "Simulated distributions of the electric field strength around (a-c) green- and (d-f) red-Si NPs under irradiation at 532 nm (a, d), 665 nm (b,e), 810 nm (c,f).",
         "S7": "Simulated distributions of the electric field strength for green- Si@Au (a-c) and red-Si@Au (d-f) NPs under irradiation at 532 nm (a, d), 665 nm (b, e), and 810 nm (c, f).",
         "S8": "Experimental temperature transients for suspensions of Paramecium caudatum cells without NPs (black dash-dotted curve), with added red-Si NPs with mean diameter of 160 nm (blue dashed curve) and red-Si@Au NPs (red curve) under NIR irradiation at 830 nm with power of 1 W. The NPs\u2019 concentrations were about 0.5 mg/mL, and the suspension volume was 1.2 mL."
+    },
+    "organic solvent and surfactant free fluorescent organic nanoparticles by laser ablation of aggregation-induced enhanced emission dyes_si.pdf": {
+        "S1": "Normalized PL spectra of DCEtDCS in THF/water mixed solvent.",
+        "S2": "AFM image of laser ablated DCEtDCS FONs",
+        "S3": "Determination of the quantum yield for laser ablated DCEtDCS FON using fluorescein as a standard reference. (a) The absorbances of fluorescein and laser ablated DCEtDCS FON (b) The measured PLQY of laser ablated DCEtDCS FON (57%) was determined relative to the standard reference fluorescein (PLQY: 95% in 0.1M aq. NaOH).",
+        "S4": "Surface charge (zeta potential) of pristine and chitosan (Ch) modified AIE FON.",
+        "S5": "AFM image and height distribution of chitosan modified DCEtDCS FONs."
     }
 }
