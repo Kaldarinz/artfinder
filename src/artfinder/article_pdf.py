@@ -1378,9 +1378,9 @@ class ArticlePDF:
         `MIN_FIGURE_DPI`..`MAX_FIGURE_DPI`; a figure drawn entirely in vectors
         and text has no raster to measure and gets `VECTOR_FIGURE_DPI`.
 
-        An image reported by `get_image_info` is measured over its whole
-        placement box, so a cropped one reads lower than its true resolution —
-        the estimate errs low.
+        An image is measured over its whole placement box, not over the part
+        its clipping path leaves visible — the pixels are spread over the box —
+        so a cropped one reads at its true resolution.
 
         Parameters
         ----------
@@ -1393,16 +1393,20 @@ class ArticlePDF:
             DPI to rasterize the figure at.
         """
 
+        placements = [
+            (image, Rect(0, 0, 1, 1) * image.transform)
+            for image in self.get_figure_images(figure_label)
+        ]
         dpis = [
             max(
-                image.width * self.POINTS_PER_INCH / image.rect.width,
-                image.height * self.POINTS_PER_INCH / image.rect.height,
+                image.width * self.POINTS_PER_INCH / placement.width,
+                image.height * self.POINTS_PER_INCH / placement.height,
             )
-            for image in self.get_figure_images(figure_label)
+            for image, placement in placements
             if image.width
             and image.height
-            and image.rect.width > 0
-            and image.rect.height > 0
+            and placement.width > 0
+            and placement.height > 0
         ]
         if not dpis:
             return self.VECTOR_FIGURE_DPI
@@ -2128,6 +2132,12 @@ class ArticlePDF:
         """
         Internal method to get all image info from a page.
 
+        An image is measured by the part of it left visible by the clipping path
+        it is drawn through, not by its whole placement box: a word processor
+        can place a panel letter as a page-sized picture clipped down to the
+        letter, and its placement box then reaches past the caption and keeps
+        the letter out of every figure.
+
         Parameters
         ----------
         page_no : int
@@ -2142,12 +2152,26 @@ class ArticlePDF:
 
         page = self.file[page_no]
         page_area = abs(page.rect)
-        all_images = tuple(
-            [
-                ImageInfoPDF.from_dict(info)
-                for info in page.get_image_info(hashes=True, xrefs=True)
-            ]
+        # What `Page.get_image_info(hashes=True, xrefs=True)` does, with clipping.
+        textpage = page.get_textpage(
+            flags=pymupdf.TEXT_PRESERVE_IMAGES | pymupdf.TEXT_CLIP
         )
+        infos = cast(list[dict], textpage.extractIMGINFO(hashes=True))
+        xrefs = {
+            Pixmap(self.file, item[0]).digest: item[0]
+            for item in self.file.get_page_images(page_no)
+        }
+        for info in infos:
+            info["xref"] = xrefs.get(info["digest"], 0)
+            # A clip trimming no more than a margin off a side of the image — a
+            # frame, the page edge — says nothing about where it is; that side
+            # keeps its placement.
+            placement = Rect(0, 0, 1, 1) * pymupdf.Matrix(info["transform"])
+            info["bbox"] = tuple(
+                shown if abs(shown - placed) > self.MARGIN else placed
+                for placed, shown in zip(tuple(placement), info["bbox"])
+            )
+        all_images = tuple([ImageInfoPDF.from_dict(info) for info in infos])
         page_size_images = [
             image
             for image in all_images
@@ -2669,11 +2693,24 @@ class ArticlePDF:
                             # under a body set at one and a half or double
                             # spacing, its lines anywhere from one line height
                             # to `MAX_SINGLE_SPACING` line heights apart.
+                            # Once the caption's own spacing is known, a line set
+                            # wider is not part of it, but one set single-spaced
+                            # still is: a word processor can close up the last
+                            # line of a paragraph set at one and a half spacing.
                             height = last_rect.height
+                            single_spaced = (
+                                (1 - self.LINE_PITCH_TOLERANCE) * height
+                                <= gap
+                                <= self.MAX_SINGLE_SPACING * height
+                            )
                             if caption_pitch is not None:
-                                consecutive = abs(gap - caption_pitch) < max(
-                                    vertical_thr,
-                                    self.LINE_PITCH_TOLERANCE * caption_pitch,
+                                consecutive = (
+                                    abs(gap - caption_pitch)
+                                    < max(
+                                        vertical_thr,
+                                        self.LINE_PITCH_TOLERANCE * caption_pitch,
+                                    )
+                                    or single_spaced
                                 )
                             else:
                                 consecutive = (
@@ -2682,9 +2719,7 @@ class ArticlePDF:
                                         vertical_thr,
                                         self.LINE_PITCH_TOLERANCE * self.line_pitch,
                                     )
-                                    or (1 - self.LINE_PITCH_TOLERANCE) * height
-                                    <= gap
-                                    <= self.MAX_SINGLE_SPACING * height
+                                    or single_spaced
                                 )
                             if consecutive and min(
                                 next_line.rect.x1, last_rect.x1
@@ -3358,13 +3393,23 @@ class ArticlePDF:
             )
         ]
         graphics_top = min((rect.y0 for rect in graphics), default=figure_rect.y1)
+        graphics_left = min((rect.x0 for rect in graphics), default=figure_rect.x0)
+        graphics_right = max((rect.x1 for rect in graphics), default=figure_rect.x1)
 
         rects: list[Rect] = list(graphics)
         for block in self._text_cache[page_no]:
             if not figure_rect.contains(block.rect):
                 continue
-            if graphics and block.rect.y1 <= graphics_top and self._is_body_text(block):
-                continue
+            if graphics and self._is_body_text(block):
+                if block.rect.y1 <= graphics_top:
+                    continue
+                # Running text beside the graphics is the column wrapped around
+                # a figure wider than one column but narrower than the page.
+                beside = (
+                    block.rect.x1 <= graphics_left or block.rect.x0 >= graphics_right
+                )
+                if beside and self._is_prose(block):
+                    continue
             rects.append(block.rect)
         if not rects:
             return figure_rect
