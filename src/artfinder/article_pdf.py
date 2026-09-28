@@ -161,6 +161,19 @@ class ArticlePDF:
     """Minimum fraction of pages that must carry two or more numbers of the same
     column. Separates line numbering from a page number in the footer, which
     occurs once per page."""
+    TILE_MIN_REPEATED_GLYPHS = 10
+    """Minimum number of glyphs drawn twice across a tile seam for a page to be
+    read as tiled. No untiled page repeats a single one."""
+    TILE_SEAM_TOLERANCE = 1.0
+    """How far, in points, a fragment may start past the end of the fragment it
+    continues, or its baseline may differ, and still be one line with it; and how
+    far it must reach back over it to repeat its last glyph."""
+    TILE_MAX_WORD_SPACE = 0.5
+    """Widest gap between a line and the fragment continuing it, as a fraction of
+    the line's height: a seam can fall on a word space."""
+    TILE_MIN_WORD_SPACE = 0.15
+    """Narrowest gap between a line and the fragment continuing it, as a fraction
+    of the font size, read as a word space when neither of them carries one."""
     XMP_DOI_PATTERN = re.compile(
         r"(?:prism:doi|dc:identifier|doi)[^>]*>\s*(?:doi:)?(10\.\d{4,9}/[^<\s]+)",
         re.IGNORECASE,
@@ -1872,7 +1885,243 @@ class ArticlePDF:
             if len(block.text) == 0 or block.text.isspace():
                 continue
             result.append(block)
+        return self._join_tile_fragments(tuple(result))
+
+    def _join_tile_fragments(
+        self, blocks: tuple[TextBlockPDF, ...]
+    ) -> tuple[TextBlockPDF, ...]:
+        """
+        Internal method to put back together the lines of a page drawn in tiles.
+
+        A PDF post-processor can redraw a page as a row of narrow vertical
+        strips, each clipped to its own rectangle. Every line of text is then cut
+        into a fragment per strip, and each strip becomes blocks of its own: a
+        caption comes out as its first few words, is narrow enough to pass for a
+        side caption, and no block is wide enough for a paragraph. A glyph
+        crossing a seam is drawn once in each strip, so the fragment that
+        continues a line starts on the same baseline with the glyph the line
+        ends in — which no untiled page does. Such a page has its fragments
+        joined into whole lines, the repeated glyph dropped, and its blocks put
+        in reading order, as the order of the strips is not.
+
+        Parameters
+        ----------
+        blocks : tuple[TextBlockPDF, ...]
+            Non-blank text blocks of a page, in the order they were drawn.
+
+        Returns
+        -------
+        tuple[TextBlockPDF, ...]
+            The same blocks, or on a tiled page, blocks of whole lines.
+        """
+
+        # Fragments as (block number, line number, line), bucketed by baseline.
+        by_baseline: dict[int, list[tuple[int, int, TextLinePDF]]] = {}
+        for block_no, block in enumerate(blocks):
+            for line_no, line in enumerate(block.lines):
+                if line.wmode == 0 and line.dir[0] > 0.99 and line.spans:
+                    by_baseline.setdefault(round(self._baseline(line)), []).append(
+                        (block_no, line_no, line)
+                    )
+
+        def neighbours(line: TextLinePDF) -> Iterable[tuple[int, int, TextLinePDF]]:
+            key = round(self._baseline(line))
+            for near_key in (key - 1, key, key + 1):
+                yield from by_baseline.get(near_key, ())
+
+        repeated_glyphs = sum(
+            1
+            for fragments in by_baseline.values()
+            for block_no, _, line in fragments
+            if any(
+                other_no != block_no and self._repeats_last_glyph(other, line)
+                for other_no, _, other in neighbours(line)
+            )
+        )
+        if repeated_glyphs < self.TILE_MIN_REPEATED_GLYPHS:
+            return blocks
+
+        # Grow each line from its leftmost fragment, strip by strip. Every line
+        # is a candidate: a superscript cut by a seam goes on above the baseline.
+        joined: dict[tuple[int, int], TextLinePDF] = {}
+        consumed: set[tuple[int, int]] = set()
+        fragments = sorted(
+            chain.from_iterable(by_baseline.values()),
+            key=lambda fragment: fragment[2].rect.x0,
+        )
+        for block_no, line_no, line in fragments:
+            continued = [
+                head for head in joined if self._is_tile_seam(joined[head], line)
+            ]
+            if continued:
+                head = min(
+                    continued, key=lambda head: abs(joined[head].rect.x1 - line.rect.x0)
+                )
+                joined[head] = self._join_fragments(joined[head], line)
+                consumed.add((block_no, line_no))
+            else:
+                joined[(block_no, line_no)] = line
+
+        result: list[TextBlockPDF] = []
+        for block_no, block in enumerate(blocks):
+            lines = [
+                joined.get((block_no, line_no), line)
+                for line_no, line in enumerate(block.lines)
+                if (block_no, line_no) not in consumed
+            ]
+            if not lines:
+                continue
+            rect = Rect()
+            for line in lines:
+                rect.include_rect(line.rect)
+            result.append(TextBlockPDF(rect=rect, lines=lines))
+        result.sort(key=lambda block: (block.rect.y0, block.rect.x0))
         return tuple(result)
+
+    @staticmethod
+    def _baseline(line: TextLinePDF) -> float:
+        """
+        Internal method to get the baseline of a line.
+
+        It is the baseline of the line's largest span: a line or a fragment of
+        one can start with a superscript, or with a symbol set in an equation
+        font on a baseline of its own.
+
+        Parameters
+        ----------
+        line : TextLinePDF
+            Line with at least one span.
+
+        Returns
+        -------
+        float
+            Vertical coordinate of the baseline.
+        """
+
+        return max(line.spans, key=lambda span: span.size).origin[1]
+
+    @classmethod
+    def _is_tile_seam(cls, line: TextLinePDF, fragment: TextLinePDF) -> bool:
+        """
+        Internal method to decide whether a fragment can continue a line.
+
+        The fragment sits on the line's baseline, or goes on at the height the
+        line breaks off at — a superscript can be cut by a seam — and starts where
+        the line ends: at most a glyph before its end, where the strips overlap,
+        and not past a word space after it.
+
+        Parameters
+        ----------
+        line : TextLinePDF
+            Line, possibly joined from several fragments already.
+        fragment : TextLinePDF
+            Fragment that may continue it.
+
+        Returns
+        -------
+        bool
+            Whether the fragment continues the line.
+        """
+
+        return (
+            min(
+                abs(cls._baseline(fragment) - cls._baseline(line)),
+                abs(fragment.spans[0].origin[1] - line.spans[-1].origin[1]),
+            )
+            <= cls.TILE_SEAM_TOLERANCE
+            and line.rect.x0 < fragment.rect.x0
+            and line.rect.x1 - line.rect.height
+            <= fragment.rect.x0
+            <= line.rect.x1
+            + max(cls.TILE_SEAM_TOLERANCE, cls.TILE_MAX_WORD_SPACE * line.rect.height)
+        )
+
+    @classmethod
+    def _repeats_last_glyph(cls, line: TextLinePDF, fragment: TextLinePDF) -> bool:
+        """
+        Internal method to decide whether a fragment redraws a line's last glyph.
+
+        Parameters
+        ----------
+        line : TextLinePDF
+            Line that may end in the glyph.
+        fragment : TextLinePDF
+            Fragment that may start with it.
+
+        Returns
+        -------
+        bool
+            Whether the fragment continues the line starting with its last glyph.
+        """
+
+        last = line.spans[-1].text[-1:]
+        return (
+            cls._is_tile_seam(line, fragment)
+            and fragment.rect.x0 < line.rect.x1 - cls.TILE_SEAM_TOLERANCE
+            and last != ""
+            and fragment.spans[0].text[:1] == last
+        )
+
+    @classmethod
+    def _join_fragments(cls, line: TextLinePDF, fragment: TextLinePDF) -> TextLinePDF:
+        """
+        Internal method to append a fragment of a tiled page to its line.
+
+        The glyph the two share is kept once, and the fragment's first span is
+        merged into the line's last one when set in the same font: `text`
+        separates spans with a space, which would split a word at the seam; a
+        seam falling between two words in a gap no strip draws a space into
+        gets one of its own.
+        Whether a span is a superscript is not a font property but guessed by
+        MuPDF from its neighbours, and the copies on either side of a seam can
+        be guessed differently.
+
+        Parameters
+        ----------
+        line : TextLinePDF
+            Line the fragment continues.
+        fragment : TextLinePDF
+            Fragment to append.
+
+        Returns
+        -------
+        TextLinePDF
+            The joined line.
+        """
+
+        spans = list(fragment.spans)
+        if cls._repeats_last_glyph(line, fragment):
+            spans[0] = replace(spans[0], text=spans[0].text[1:])
+            if not spans[0].text:
+                spans.pop(0)
+        joined_spans = list(line.spans)
+        if spans:
+            last, first = joined_spans[-1], spans[0]
+            if (
+                last.font == first.font
+                and last.size == first.size
+                and last.flags & ~pymupdf.TEXT_FONT_SUPERSCRIPT
+                == first.flags & ~pymupdf.TEXT_FONT_SUPERSCRIPT
+                and last.color == first.color
+                and abs(last.origin[1] - first.origin[1]) <= cls.TILE_SEAM_TOLERANCE
+            ):
+                span_rect = Rect(last.rect)
+                span_rect.include_rect(first.rect)
+                gap = fragment.rect.x0 - line.rect.x1
+                separator = (
+                    " "
+                    if gap > cls.TILE_MIN_WORD_SPACE * first.size
+                    and not last.text[-1:].isspace()
+                    and not first.text[:1].isspace()
+                    else ""
+                )
+                joined_spans[-1] = replace(
+                    last, rect=span_rect, text=last.text + separator + first.text
+                )
+                spans.pop(0)
+        rect = Rect(line.rect)
+        rect.include_rect(fragment.rect)
+        return replace(line, rect=rect, spans=joined_spans + spans)
 
     def _get_text_blocks_from_page(self, page_no: int) -> tuple[TextBlockPDF, ...]:
         """
