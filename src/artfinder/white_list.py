@@ -22,7 +22,7 @@ async def get_journal_info(issn: str) -> int | None:
 
     Returns
     -------
-        A dictionary containing the journal information, or None if not found.
+        The journal's white-list level, or None if not found.
     """
 
     url = f"https://journalrank.rcsi.science/api/record-sources/{issn}/level"
@@ -63,7 +63,7 @@ def _run_coro_sync(coro):
     except RuntimeError:
         return asyncio.run(coro)
 
-    result: dict[str, dict | None] = {}
+    result: dict[str, int | None] = {}
     error: dict[str, Exception] = {}
 
     def runner():
@@ -83,10 +83,13 @@ def _run_coro_sync(coro):
 
 
 def get_journal_info_sync(
-    title: str | None = None, issn: str | None = None
-) -> dict | None:
+    title: str | None = None, issn: str | list[str] | None = None
+) -> int | None:
     """
     Synchronous version of get_journal_info for use in non-async contexts.
+
+    Given several ISSNs (print and electronic), returns the level of the first one
+    found in the white list.
     """
     if issn is None and title is None:
         logging.error("Either title or issn must be provided.")
@@ -103,10 +106,12 @@ def get_journal_info_sync(
         else:
             logging.warning(f"Journal with title '{title}' not found in SciMagoJR.")
             return None
-    else:
+    elif isinstance(issn, str):
         issns = [issn]
+    else:
+        issns = issn
 
-    async def _get_first_journal_info() -> dict | None:
+    async def _get_first_journal_info() -> int | None:
         results = await asyncio.gather(*(get_journal_info(issn_) for issn_ in issns))
         for journal_info in results:
             if journal_info is not None:

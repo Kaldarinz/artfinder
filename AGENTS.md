@@ -28,7 +28,7 @@ Single test file / single test:
 venv/bin/python -m pytest tests/test_article_pdf/test_figure_captions.py -k test_figure_captions_keys_are_labels
 ```
 
-Type check (defined as a hatch env in `pyproject.toml`; needs `hatch`, or run `mypy` directly against the same targets after `venv/bin/pip install mypy`):
+Type check (defined as a hatch env in `pyproject.toml`; needs `hatch`, or run `mypy` directly against the same targets after `venv/bin/pip install mypy pandas-stubs types-requests`):
 
 ```bash
 hatch run types:check
@@ -36,7 +36,7 @@ hatch run types:check
 venv/bin/mypy src/artfinder tests
 ```
 
-Before completing a change, type-check every edited Python file and resolve reported errors. The type check is *not* clean — see the baseline in `docs/test_setup.md` and make sure your change does not raise the total.
+Before completing a change, type-check every edited Python file and resolve reported errors. The type check is clean; keep it that way.
 
 **Working in a `git worktree`?** The venv's editable install points at the main checkout, so a careless invocation checks the wrong source tree and your edits look like no-ops. Tests are already handled (`pythonpath = ["src"]` in `pyproject.toml`), but single-file `mypy` runs are not. Read [docs/test_setup.md](docs/test_setup.md) before running anything from a worktree.
 

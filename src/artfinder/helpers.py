@@ -10,7 +10,7 @@ import re
 import sys
 
 try:
-    from IPython.display import DisplayHandle, display
+    from IPython.display import DisplayHandle, display  # type: ignore[import-not-found]
 except ImportError:
     ...
 from typing import (
@@ -302,5 +302,6 @@ def clip_to_grid(rect: Rect, digits=2) -> Rect:
     Rect
         New rectangle with clipped coordinates.
     """
-    return Rect([round(coord, digits) for coord in rect])
+    coords = (rect.x0, rect.y0, rect.x1, rect.y1)
+    return Rect([round(coord, digits) for coord in coords])
 

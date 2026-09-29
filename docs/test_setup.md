@@ -7,11 +7,14 @@ code you just edited.
 
 ## Install the tooling first
 
-Neither `pytest` nor `mypy` ships in `venv/`:
+Neither `pytest` nor `mypy` ships in `venv/`, nor do the pandas and requests stubs
+that `hatch run types:check` fetches with `--install-types`:
 
 ```bash
-venv/bin/pip install pytest mypy
+venv/bin/pip install pytest mypy pandas-stubs types-requests
 ```
+
+Without the stubs mypy reports every `import pandas` as an error.
 
 ## Tests
 
@@ -73,16 +76,12 @@ hatch run types:check
 
 ## Known baseline
 
-There is no CI, and the type check is not clean. As of the DOI-extraction work
-(2026-08-29):
-
 - `venv/bin/python -m pytest tests` — all tests pass.
-- `venv/bin/mypy src/artfinder tests` — **75 errors in 8 files**, all pre-existing.
+- `venv/bin/mypy src/artfinder tests` — clean (2026-09-29), and clean with
+  `--warn-unused-ignores` too.
 
-Re-measured before the figure-label work (2026-09-10) on the same commit: **79 errors in
-9 files**. After the graphics-first figure bounding (2026-09-29), which removed the
-side-caption code: **74 errors in 10 files**. Use the latest number when comparing.
-
-Most are `Page? has no attribute ...` from incomplete PyMuPDF stubs. Compare against this
-number rather than expecting zero: the rule in `AGENTS.md` is to resolve errors *in the
-files you edited*, so check that your change does not raise the total.
+PyMuPDF's `Page` is invisible to mypy: `pymupdf/__init__.py` binds the name to a string
+before it defines the class. `article_pdf.py` therefore declares a stand-in `Page` under
+`TYPE_CHECKING`, and reaches pages through `ArticlePDF._page(page_no)` rather than
+`self.file[page_no]`, whose return type mypy cannot resolve. Use the accessor in new
+code instead of adding `# type: ignore`.

@@ -137,15 +137,11 @@ class CrossrefArticle(Article):
         """Extract the data from the dictionary."""
 
         # some values can be directly assigned
-        accept_fields = [
-            "publisher",
-            "issue",
-            "license",
-            "type",
-            "volume",
-        ]
-        for field in accept_fields:
-            setattr(self, field, data.get(field, None))
+        self.publisher = data.get("publisher", None)
+        self.issue = data.get("issue", None)
+        self.license = data.get("license", None)
+        self.type = data.get("type", None)
+        self.volume = data.get("volume", None)
 
         # others require processing
         self.title = self._extract_title(data)
@@ -408,7 +404,7 @@ class ArticleCollection:
 
     def to_df(self) -> DataFrame:
         """Convert the collection to a pandas DataFrame."""
-        df = pd.DataFrame([article.to_dict() for article in self.articles])  # type: ignore[assignment]
+        df = pd.DataFrame([article.to_dict() for article in self.articles])
         df = _format_df(df)
         if df.size == 0:
             df = DataFrame(columns=CrossrefArticle.get_all_slots())
@@ -425,7 +421,7 @@ def load_csv(path: str) -> DataFrame:
     return df
 
 
-def _parse_list_value(value: object) -> object:
+def _parse_list_value(value: Any) -> object:
     """
     Turn one cell of a list-valued column into a Python object.
 
@@ -434,7 +430,7 @@ def _parse_list_value(value: object) -> object:
 
     Parameters
     ----------
-    value : object
+    value : Any
         Cell value: a list or dict, its repr, or a missing value.
 
     Returns

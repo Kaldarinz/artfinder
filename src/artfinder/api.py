@@ -289,7 +289,7 @@ class ArtFinder:
                 dois.extend(more)
         elif isinstance(articles, DataFrame):
             for _, article in articles.iterrows():
-                if (more := article["references"]) is not None:  # type: ignore
+                if (more := article["references"]) is not None:
                     dois.extend(more)
         else:
             raise TypeError("article must be CrossrefArticle, Series or DataFrame")
@@ -401,7 +401,7 @@ class ArtFinder:
         article: CrossrefArticle | Series | None = None,
         title: str | None = None,
         issn: list[str] | None = None,
-    ) -> dict | None:
+    ) -> int | None:
         """
         Get journal impact factor by its title or ISSN. Or get journal info from article.
 
@@ -411,12 +411,12 @@ class ArtFinder:
             Article to get journal info for. If provided, title and issn are ignored.
         title : str | None
             Title of the journal.
-        issn : str | None
-            ISSN of the journal.
+        issn : list[str] | None
+            ISSNs of the journal.
 
         Returns
         -------
-        Impact factor of the journal or None if not found.
+        White-list level of the journal or None if not found.
         """
 
         if article is not None:

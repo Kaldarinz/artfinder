@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 import pandas as pd
-from pyiso4.ltwa import Abbreviate
+from pyiso4.ltwa import Abbreviate  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +95,8 @@ class SciMagoJR:
                 "Areas",
             ]
         ]
-        journal_data = journal_data.reset_index(drop=True).iloc[0]  # type: ignore
-        journal_data.index = [
+        journal = journal_data.reset_index(drop=True).iloc[0]
+        journal.index = [
             "title",
             "type",
             "issns",
@@ -110,19 +110,19 @@ class SciMagoJR:
             "areas",
         ]
         # Add abbreviation
-        journal_data["abbreviation"] = Abbreviate.create()(
-            title=journal_data.title, remove_part=True
+        journal["abbreviation"] = Abbreviate.create()(
+            title=journal.title, remove_part=True
         )
 
         # Foramt open_access
-        journal_data["open_access"] = {"Yes": True, "No": False}.get(
-            journal_data["open_access"], False
+        journal["open_access"] = {"Yes": True, "No": False}.get(
+            journal["open_access"], False
         )
 
         # Format Categories
-        cats = journal_data["categories"].replace(";", ",")
-        journal_data["categories"] = re.sub(r"\s*\(Q\d\)", "", cats)
+        cats = journal["categories"].replace(";", ",")
+        journal["categories"] = re.sub(r"\s*\(Q\d\)", "", cats)
 
         # Format areas
-        journal_data["areas"] = journal_data["areas"].replace(";", ",")
-        return journal_data
+        journal["areas"] = journal["areas"].replace(";", ",")
+        return journal

@@ -22,15 +22,23 @@ from math import floor, inf
 from statistics import median
 from os import PathLike
 from pathlib import Path
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from warnings import warn
 
 import numpy as np
 import pandas as pd
 import pymupdf
-from pymupdf import Page, Pixmap, Rect
+from pymupdf import Pixmap, Rect
 from scipy.optimize import linear_sum_assignment  # type: ignore[import-untyped]
 from sklearn.cluster import DBSCAN  # type: ignore[import-untyped]
+
+if TYPE_CHECKING:
+    # PyMuPDF binds `Page` to a string before it defines the class, so mypy never
+    # sees the class, nor what `Document` returns for a page.
+    class Page(Any): ...
+
+else:
+    from pymupdf import Page
 
 from artfinder.dataclasses import (
     DocumentElementsPDF,
@@ -308,7 +316,7 @@ class ArticlePDF:
             if self.doi is not None:
                 self.identifier = self.make_valid_filename(self.doi)
             else:
-                self.identifier = self.make_valid_filename(self.file[0].get_text()[:50])  # type: ignore
+                self.identifier = self.make_valid_filename(self._page(0).get_text()[:50])
 
     def __enter__(self):
         """Context manager entry."""
@@ -325,6 +333,10 @@ class ArticlePDF:
 
     def __repr__(self):
         return f"Article('{self.identifier}', pages={len(self.file)})"
+
+    def _page(self, page_no: int) -> Page:
+        """Page `page_no` of the document, typed as `Page` (see its import)."""
+        return self.file[page_no]
 
     @staticmethod
     def make_valid_filename(name: str) -> str:
@@ -502,7 +514,7 @@ class ArticlePDF:
         int
             The estimated number of columns (1, 2, etc.).
         """
-        all_widths = [self.file[i].rect.width for i in range(self.file.page_count)]
+        all_widths = [self._page(i).rect.width for i in range(self.file.page_count)]
         if len(all_widths):
             page_width = sum(all_widths) / len(all_widths)
         else:
@@ -625,7 +637,7 @@ class ArticlePDF:
         """
 
         # We assume that all pages in the pdf file have the same size
-        search_rect = cast(Rect, self.file[0].rect)
+        search_rect = cast(Rect, self._page(0).rect)
         search_rect.y1 = search_rect.height * self.HEADER_MAX_FRACTION
 
         common = self._repeating_rects_in(search_rect, is_header=True)
@@ -653,7 +665,7 @@ class ArticlePDF:
             The footer rectangle if found, otherwise an empty Rect.
         """
 
-        page_rect = cast(Rect, self.file[0].rect)  # type: ignore[attr-defined]
+        page_rect = cast(Rect, self._page(0).rect)
         search_rect = Rect(
             page_rect.x0,
             page_rect.y1 - page_rect.height * self.FOOTER_MAX_FRACTION,
@@ -924,7 +936,7 @@ class ArticlePDF:
             List of paragraph rectangles.
         """
 
-        if isinstance(page_no, Page):  # type: ignore[arg-type]
+        if isinstance(page_no, Page):
             page_no = cast(int, page_no.number)
 
         pages: Iterable[int]
@@ -1102,7 +1114,7 @@ class ArticlePDF:
 
     def get_table_rects(
         self,
-        page_no: Page | int | None = None,  # type: ignore[valid-type]
+        page_no: Page | int | None = None,
         clip: Rect | None = None,
         copy_rects: bool = True,
     ) -> list[Rect]:
@@ -1130,7 +1142,7 @@ class ArticlePDF:
 
     def get_table_caption_rects(
         self,
-        page_no: Page | int | None = None,  # type: ignore[valid-type]
+        page_no: Page | int | None = None,
         clip: Rect | None = None,
         copy_rects: bool = True,
     ) -> list[Rect]:
@@ -1161,7 +1173,7 @@ class ArticlePDF:
 
     def get_tables(
         self,
-        page_no: Page | int | None = None,  # type: ignore[valid-type]
+        page_no: Page | int | None = None,
         clip: Rect | None = None,
         copy_tables: bool = False,
     ) -> dict[str, TablePDF]:
@@ -1183,7 +1195,7 @@ class ArticlePDF:
             Dictionary of tables keyed by table label.
         """
 
-        if isinstance(page_no, Page):  # type: ignore[arg-type]
+        if isinstance(page_no, Page):
             page_no = cast(int, page_no.number)
 
         pages: Iterable[int]
@@ -1339,7 +1351,7 @@ class ArticlePDF:
             return xmp_doi
 
         for page_no in range(self.file.page_count):
-            page_text = self.file[page_no].get_text()
+            page_text = self._page(page_no).get_text()
             if not isinstance(page_text, str):
                 continue
             # The bibliography lists the DOIs of cited works, never the article's own.
@@ -1728,7 +1740,7 @@ class ArticlePDF:
         for fig_label in figures:
             fig_dpi = self._figure_dpi(fig_label) if dpi == "auto" else dpi
             page_ind = self._figure_label_to_page_ind[fig_label]
-            pixmap = self.file[page_ind].get_pixmap(
+            pixmap = self._page(page_ind).get_pixmap(
                 dpi=fig_dpi, clip=figures[fig_label].rect
             )
 
@@ -1795,9 +1807,9 @@ class ArticlePDF:
             elements = [elements]
 
         if page_number is None:
-            pages = cast(list[Page], list(self.file))  # type: ignore
+            pages = [self._page(i) for i in range(self.file.page_count)]
         else:
-            pages = [self.file[page_number]]
+            pages = [self._page(page_number)]
 
         for page in pages:
             rects = []
@@ -1835,14 +1847,14 @@ class ArticlePDF:
                     rects.extend(self.get_figure_rects(page.number, copy_rects=False))
                 if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.TABLE]:
                     rects.extend(
-                        self.get_table_rects(page.number, copy_rects=False)  # type: ignore[attr-defined]
+                        self.get_table_rects(page.number, copy_rects=False)
                     )
                 if element in [
                     DocumentElementsPDF.ALL,
                     DocumentElementsPDF.TABLE_CAPTION,
                 ]:
                     rects.extend(
-                        self.get_table_caption_rects(page.number, copy_rects=False)  # type: ignore[attr-defined]
+                        self.get_table_caption_rects(page.number, copy_rects=False)
                     )
 
             for rect in rects:
@@ -1945,9 +1957,9 @@ class ArticlePDF:
 
         result: list[TextBlockPDF] = []
         text_blocks = [
-            TextBlockPDF.from_dict(block)  # type: ignore
-            for block in self.file[page_no].get_text(option="dict")["blocks"]  # type: ignore
-            if block["type"] == 0  # type: ignore
+            TextBlockPDF.from_dict(block)
+            for block in self._page(page_no).get_text(option="dict")["blocks"]
+            if block["type"] == 0
         ]
         for block in text_blocks:
             # Skip blank blocks
@@ -2277,7 +2289,7 @@ class ArticlePDF:
         page_count = self.file.page_count
         candidates: list[tuple[int, int, TextLinePDF]] = []
         for page_no in range(page_count):
-            page_width = cast(Rect, self.file[page_no].rect).width  # type: ignore
+            page_width = cast(Rect, self._page(page_no).rect).width
             max_width = page_width * self.LINE_NUMBER_MAX_WIDTH
             for block in self._raw_text_cache[page_no]:
                 for line in block.lines:
@@ -2322,7 +2334,7 @@ class ArticlePDF:
             Left and right bounds of the searchable area of the page.
         """
 
-        page_rect = cast(Rect, self.file[page_no].rect)  # type: ignore
+        page_rect = cast(Rect, self._page(page_no).rect)
         left_bound = page_rect.x0
         right_bound = page_rect.x1
 
@@ -2439,7 +2451,7 @@ class ArticlePDF:
             Drawing objects on the page.
         """
 
-        page = self.file[page_no]
+        page = self._page(page_no)
         drawings = tuple(
             [
                 DrawingObjectPDF(**{k: v for k, v in dr.items() if v is not None})
@@ -2470,7 +2482,7 @@ class ArticlePDF:
             `MAX_IMAGE_AREA`).
         """
 
-        page = self.file[page_no]
+        page = self._page(page_no)
         page_area = abs(page.rect)
         # What `Page.get_image_info(hashes=True, xrefs=True)` does, with clipping.
         textpage = page.get_textpage(
@@ -2532,7 +2544,7 @@ class ArticlePDF:
         if page is None:
             outpdf = pymupdf.open()
             page = outpdf.new_page(
-                width=self.file[0].rect.width, height=self.file[0].rect.height
+                width=self._page(0).rect.width, height=self._page(0).rect.height
             )
         shape = page.new_shape()
         for drawing in drawings:
@@ -2573,7 +2585,7 @@ class ArticlePDF:
         if page is None:
             outpdf = pymupdf.open()
             page = outpdf.new_page(
-                width=self.file[0].rect.width, height=self.file[0].rect.height
+                width=self._page(0).rect.width, height=self._page(0).rect.height
             )
         shape = page.new_shape()
         for block in text_blocks:
@@ -2604,7 +2616,7 @@ class ArticlePDF:
         if page is None:
             outpdf = pymupdf.open()
             page = outpdf.new_page(
-                width=self.file[0].rect.width, height=self.file[0].rect.height
+                width=self._page(0).rect.width, height=self._page(0).rect.height
             )
         for image in images:
             image_pm = Pixmap(self.file, image.xref)
@@ -2686,7 +2698,7 @@ class ArticlePDF:
         width_mean = largest_cluster[("width", "mean")]
         width_min = largest_cluster[("width", "min")]
         width_max = largest_cluster[("width", "max")]
-        return Size(mean=width_mean, min=width_min, max=width_max)  # type: ignore
+        return Size(mean=width_mean, min=width_min, max=width_max)
 
     @staticmethod
     def _caption_label(match: re.Match[str]) -> str:
@@ -2910,7 +2922,7 @@ class ArticlePDF:
         ) -> dict[int, tuple[FigureCaptionPDF, ...]]:
             vertical_thr = 1
             fig_captures = []
-            text_blocks = self._text_cache[page.number]  # type: ignore
+            text_blocks = self._text_cache[page.number]
             num_blocks = len(text_blocks)
             i = 0
             while i < num_blocks:
@@ -3079,11 +3091,11 @@ class ArticlePDF:
                         )
                     )
                 i += 1
-            return {page.number: tuple(fig_captures)}  # type: ignore
+            return {page.number: tuple(fig_captures)}
 
         captions: dict[int, tuple[FigureCaptionPDF, ...]] = {}
         for page_no in range(self.file.page_count):
-            captions.update(_find_figure_captions_in_page(self.file[page_no]))
+            captions.update(_find_figure_captions_in_page(self._page(page_no)))
         # Some text paragraphs can start the same way as figure caption.
         # Text paragraph usually have their font_flag different from font_flag
         # of matched_pattern in real figure caption.
@@ -3531,7 +3543,7 @@ class ArticlePDF:
             Rectangles of the drawings and images, as copies.
         """
 
-        page_rect = cast(Rect, self.file[page_no].rect)  # type: ignore[attr-defined]
+        page_rect = cast(Rect, self._page(page_no).rect)
         page_area = page_rect.get_area()
         table_rects = self.get_table_rects(page_no, copy_rects=False)
         # Each candidate goes with the width of the stroke it is painted with:
@@ -3610,7 +3622,7 @@ class ArticlePDF:
 
         if self.columns_number != 2:
             return None
-        page_width = cast(Rect, self.file[page_no].rect).width  # type: ignore[attr-defined]
+        page_width = cast(Rect, self._page(page_no).rect).width
         paragraph_rects = self.get_paragraph_rects(page_no, copy_rects=False)
         left_columns_x1 = [rect.x1 for rect in paragraph_rects if rect.x1 < page_width * 0.6]
         right_columns_x0 = [rect.x0 for rect in paragraph_rects if rect.x0 > page_width * 0.4]
@@ -4007,7 +4019,7 @@ class ArticlePDF:
             Figures drawn on the page.
         """
 
-        page = self.file[page_no]
+        page = self._page(page_no)
         figure_captions = self._figure_captions_cache[page_no]
         matches = self._figure_matches_cache[page_no]
         matched = {
@@ -4099,7 +4111,7 @@ class ArticlePDF:
         ):
             return None
 
-        page_rect = cast(Rect, self.file[page_no].rect)  # type: ignore[attr-defined]
+        page_rect = cast(Rect, self._page(page_no).rect)
         above_caption = Rect(
             page_rect.x0, self.header_rect.y1, page_rect.x1, caption.rect.y0
         )
@@ -4113,7 +4125,7 @@ class ArticlePDF:
 
         prev_page_no = page_no - 1
         figure_rect = copy(
-            cast(Rect, self.file[prev_page_no].rect)  # type: ignore[attr-defined]
+            cast(Rect, self._page(prev_page_no).rect)
         )
         figure_rect.x0, figure_rect.x1 = self._line_number_gutter(prev_page_no)
         if not self.footer_rect.is_empty:
@@ -4172,7 +4184,7 @@ class ArticlePDF:
             columns, or a page carrying only one column of paragraphs.
         """
 
-        page = self.file[page_no]
+        page = self._page(page_no)
         page_width = page.rect.width
         figure_rect = cast(Rect, copy(page.rect))
         figure_rect.x0, figure_rect.x1 = self._line_number_gutter(page_no)

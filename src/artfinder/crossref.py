@@ -373,15 +373,7 @@ class Crossref(Endpoint):
         Get all references from articles in the DataFrame.
         """
 
-        # Get all references from articles in the DataFrame
         raise NotImplementedError("This method is not implemented yet.")
-        all_refs = []
-        for article in df["references"]:
-            if article is not None:
-                all_refs.extend(article)
-        all_refs = list(set(all_refs))
-        print(f"Found {len(all_refs)} unique references.")
-        return _execute_coro(self._get_with_limit, all_refs, rate_limit=concurrent_lim)
 
 
 class CrossrefFilterValidator:

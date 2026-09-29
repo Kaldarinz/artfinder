@@ -120,10 +120,10 @@ class AsyncHTTPRequest:
         tot_urls = len(urls)
 
         # Additional timeout for rate-limiting
-        rate_limit_extra_timeout = 0
+        rate_limit_extra_timeout = 0.0
 
         # Start time of the rate-limiting period
-        rate_limited_start_time = 0
+        rate_limited_start_time = 0.0
 
         # Semaphore to limit concurrent requests
         concur_requests_limit = asyncio.Semaphore(self.concurrency_limit)
@@ -198,11 +198,8 @@ class AsyncHTTPRequest:
                             # if it is greater than the current rate_limit_extra_timeout
                             else:
                                 if (
-                                    additional_timeout := (
-                                        time() - rate_limited_start_time
-                                    )
-                                    > rate_limit_extra_timeout
-                                ):
+                                    additional_timeout := time() - rate_limited_start_time
+                                ) > rate_limit_extra_timeout:
                                     rate_limit_extra_timeout = additional_timeout
                         # retry for internal server errors
                         elif 500 <= response.status < 600:
@@ -210,13 +207,13 @@ class AsyncHTTPRequest:
                         # return None for all other errors
                         else:
                             logger.error(f"Error fetching {url}: {response.status}")
-                            return
+                            return None
                     left_retries -= 1
                 logger.error(f"Max retries exceeded for {url}")
-                return
+                return None
             except Exception as e:
                 logger.error(f"Error fetching {url}: {e}")
-                return
+                return None
 
         async def fetch_with_limit(
             session: ClientSession, url: str, index: int
@@ -371,10 +368,10 @@ class FileDownloader:
         pairs = [(url, path) for url, path in zip(urls, save_paths) if url is not None]
         self.urls = [pair[0] for pair in pairs]
         self.save_paths = [pair[1] for pair in pairs]
-        self.downloaded = []
-        self.restricted = []
-        self.missing = []
-        self.failed = []
+        self.downloaded: list[str] = []
+        self.restricted: list[str] = []
+        self.missing: list[str] = []
+        self.failed: list[tuple[str, str | int | Exception]] = []
         self.concurrency_limiter = asyncio.Semaphore(concurency_limit)
         self.chunk_size = 1024
         self.printer = MultiLinePrinter(concurency_limit + 1)
@@ -420,6 +417,7 @@ class FileDownloader:
         for entry in link_entry:
             if entry.get("content-type") == "application/pdf":
                 return entry.get("url")
+        return None
 
     async def _download_files(self) -> "FileDownloader":
         """
@@ -559,7 +557,7 @@ class FileDownloader:
         total_size = int(
             response.headers.get("Content-Length", 0)
         ) / 1024  
-        downloaded_size = 0
+        downloaded_size = 0.0
         with open(path, "wb") as f:
             try:
                 while chunk := await response.content.read(self.chunk_size):
@@ -579,12 +577,12 @@ class FileDownloader:
                         )
             except (ClientError, asyncio.IncompleteReadError) as e:
                 progress_line.update(f"Error: {e}. File: {filename}")
-                self.failed.append((response.url, e))
+                self.failed.append((str(response.url), e))
                 # Delete the partially downloaded file
                 if os.path.exists(path):
                     os.remove(path)
                 return False
-        self.downloaded.append(response.url)
+        self.downloaded.append(str(response.url))
         progress_line.update(f"Downloaded {int(downloaded_size)} kb. File: {filename}")
         return True
 
@@ -629,7 +627,7 @@ def _execute_coro(func: Callable[P, Coroutine[Any, Any, T]], *args, **kwargs) ->
     Launch function asyncronously in separate thread.
     """
 
-    result_queue = Queue()
+    result_queue: Queue[T] = Queue()
 
     def get_func():
         result = asyncio.run(func(*args, **kwargs))
