@@ -351,7 +351,7 @@ class ArtFinder:
             for doi, title in zip(dois, titles)
         ]
         return FileDownloader(
-            links=articles["link"].to_list(),
+            links=articles["links"].to_list(),
             save_paths=paths,
             concurency_limit=max_connections,
         ).download_files()

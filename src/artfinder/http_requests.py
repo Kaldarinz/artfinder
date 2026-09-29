@@ -358,7 +358,7 @@ class FileDownloader:
         Parameters
         ----------
         links : list[list[dict] | None]
-            "link" field from Article object.
+            "links" field from Article object, one entry per article.
         save_paths : list[str]
             Paths to save the downloaded files.
         concurency_limit : int
@@ -415,7 +415,7 @@ class FileDownloader:
         if link_entry is None or len(link_entry) == 0:
             return None
         for entry in link_entry:
-            if entry.get("content-type") == "application/pdf":
+            if entry.get("content_type") == "application/pdf":
                 return entry.get("url")
         return None
 
