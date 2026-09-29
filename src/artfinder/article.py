@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime
+import logging
 import re
 from ast import literal_eval
 
@@ -13,6 +14,19 @@ from typing import Any, Dict, List, Iterable
 
 import pandas as pd
 from pandas import DataFrame
+
+logger = logging.getLogger(__name__)
+
+#: Columns holding lists of values or records rather than one scalar.
+LIST_COLUMNS = (
+    "license",
+    "links",
+    "authors",
+    "references",
+    "funders",
+    "keywords",
+    "issn",
+)
 
 
 # TODO: There should probably be only one Article class
@@ -47,14 +61,27 @@ class Article:
             setattr(self, slot, None)
 
     def to_dict(self) -> Dict[Any, Any]:
-        """Convert the parsed information to a Python dict."""
+        """
+        Convert the parsed information to a Python dict.
+
+        Scalar fields other than the journal are stringified and lowercased.
+        List-valued fields (`LIST_COLUMNS`) are left as Python objects: their
+        text is case-sensitive (URLs, ISSN check digits, names), and their
+        repr would carry any None inside them as text.
+
+        Returns
+        -------
+        Dict[Any, Any]
+            Field names mapped to their values.
+        """
         dct = {key: self.__getattribute__(key) for key in self.get_all_slots()}
         for key, val in dct.items():
-            if val is not None:
-                if key in ["authors", "journal"]:
-                    dct[key] = str(val)
-                else:
-                    dct[key] = str(val).lower()
+            if val is None or key in LIST_COLUMNS:
+                continue
+            if key == "journal":
+                dct[key] = str(val)
+            else:
+                dct[key] = str(val).lower()
         return dct
 
     @classmethod
@@ -191,9 +218,29 @@ class CrossrefArticle(Article):
     def _extract_authors(
         self, data: dict[str, Any]
     ) -> List[dict[str, str | list[str] | None]]:
-        """Extract the authors from the data."""
+        """
+        Extract the authors from the data, in the order Crossref lists them.
 
-        authors_list = data.get("author", [])
+        Crossref also lists organisations as authors, each a bare `name` with no
+        `family` or `given`. Only people listed outside an organisation's section
+        are authors here (`_drop_organisation_sections`). Every one of them is
+        kept, even one listed twice: two entries with the same name may be two
+        people.
+
+        Parameters
+        ----------
+        data : dict[str, Any]
+            Crossref work record.
+
+        Returns
+        -------
+        List[dict[str, str | list[str] | None]]
+            One record per author.
+        """
+
+        authors_list = self._drop_organisation_sections(
+            data.get("author", []), data.get("DOI")
+        )
         for i in range(len(authors_list)):
             author = authors_list[i]
             author_new = {}
@@ -210,8 +257,8 @@ class CrossrefArticle(Article):
                 author_new["affiliation"] = [
                     aff.get("name") for aff in affiliation if aff.get("name")
                 ]
-            if author.get("ORCID"):
-                author_new["orcid"] = author.get("ORCID").split("/")[-1]
+            if orcid := author.get("ORCID"):
+                author_new["orcid"] = orcid.split("/")[-1]
             if author.get("sequence"):
                 if i == len(authors_list) - 1:
                     author_new["position"] = "last"
@@ -225,6 +272,47 @@ class CrossrefArticle(Article):
                 author_new["position"] = "additional"
             authors_list[i] = author_new
         return authors_list
+
+    @staticmethod
+    def _drop_organisation_sections(
+        authors: list[dict[str, Any]], doi: str | None
+    ) -> list[dict[str, Any]]:
+        """
+        Keep the people listed before the first organisation in an author array.
+
+        An organisation is an entry with neither a family nor a given name. It
+        opens a section of the byline, and the people listed after it are its
+        members, not authors in their own right. Crossref's array is flat, with
+        nothing marking where a section ends, so the organisation and everything
+        after it is dropped.
+
+        Parameters
+        ----------
+        authors : list[dict[str, Any]]
+            Crossref `author` array.
+        doi : str | None
+            DOI of the work, for the log.
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            The people before the first organisation, in Crossref's order.
+        """
+
+        for index, author in enumerate(authors):
+            if not (
+                author.get("family")
+                or author.get("lastname")
+                or author.get("given")
+                or author.get("firstname")
+            ):
+                logger.info(
+                    f"{doi}: dropped organisation {author.get('name')!r} and the "
+                    f"{len(authors) - index - 1} entries after it, keeping {index} "
+                    "authors."
+                )
+                return authors[:index]
+        return list(authors)
 
     def _extract_issn(self, data: dict[str, Any]) -> list[str]:
         """Extract the ISSN from the data."""
@@ -247,10 +335,14 @@ class CrossrefArticle(Article):
         return None, None
 
     def _extract_references(self, data: dict[str, Any]) -> List[str]:
-        """Extract the references from the data."""
+        """Extract the lowercased DOIs of the references from the data."""
         references = data.get("reference", None)
         ref_list = (
-            [reference.get("DOI") for reference in references if reference.get("DOI")]
+            [
+                reference.get("DOI").lower()
+                for reference in references
+                if reference.get("DOI")
+            ]
             if references
             else []
         )
@@ -270,6 +362,7 @@ class CrossrefArticle(Article):
             else:
                 day = 1
             return datetime.date(year, month, day)
+        return None
 
     def _extract_abstract(self, data: dict[str, Any]) -> str | None:
         """Extract the abstract from the data."""
@@ -283,6 +376,7 @@ class CrossrefArticle(Article):
             raw_abstract = raw_abstract.replace("\t", "").replace("\n", "")
             if len(raw_abstract) > 1:
                 return raw_abstract
+        return None
 
     @classmethod
     def col_types(cls) -> Dict[str, str]:
@@ -331,6 +425,30 @@ def load_csv(path: str) -> DataFrame:
     return df
 
 
+def _parse_list_value(value: object) -> object:
+    """
+    Turn one cell of a list-valued column into a Python object.
+
+    An article converted in memory already holds the list; a CSV holds its repr,
+    which is parsed back.
+
+    Parameters
+    ----------
+    value : object
+        Cell value: a list or dict, its repr, or a missing value.
+
+    Returns
+    -------
+    object
+        The list or dict, or None for a missing value.
+    """
+    if isinstance(value, str):
+        return literal_eval(value)
+    if isinstance(value, (list, dict)) or not pd.isna(value):
+        return value
+    return None
+
+
 def _format_df(df: DataFrame) -> DataFrame:
     """
     Format the DataFrame to have the correct columns and types."
@@ -341,22 +459,12 @@ def _format_df(df: DataFrame) -> DataFrame:
     for col in cols:
         if col not in df.columns:
             df[col] = pd.NA
-    # Convert to lower case
+    # Convert to lower case. A column empty in every row reads back from a CSV
+    # as float NaN, which the .str accessor refuses.
     for col in ["title", "abstract", "publisher"]:
-        df[col] = df[col].str.lower()
-    # convert to python objects to python types
-    for col in [
-        "license",
-        "links",
-        "authors",
-        "references",
-        "funders",
-        "keywords",
-        "issn",
-    ]:
-        df[col] = (
-            df[col].fillna("None").str.replace("none", "None").transform(literal_eval)
-        )
+        df[col] = df[col].astype("string").str.lower()
+    for col in LIST_COLUMNS:
+        df[col] = df[col].map(_parse_list_value)
     # apply column types
     df = df.astype(CrossrefArticle.col_types())
     df["publication_date"] = pd.to_datetime(
