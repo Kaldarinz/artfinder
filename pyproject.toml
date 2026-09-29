@@ -25,7 +25,9 @@ dependencies = [
   "aiohttp",
   "requests",
   "pymupdf",
+  "numpy",
   "scikit-learn",
+  "scipy",
   "pyiso4",
 ]
 

@@ -80,7 +80,8 @@ There is no CI, and the type check is not clean. As of the DOI-extraction work
 - `venv/bin/mypy src/artfinder tests` — **75 errors in 8 files**, all pre-existing.
 
 Re-measured before the figure-label work (2026-09-10) on the same commit: **79 errors in
-9 files**. Use the larger, current number when comparing.
+9 files**. After the graphics-first figure bounding (2026-09-29), which removed the
+side-caption code: **74 errors in 10 files**. Use the latest number when comparing.
 
 Most are `Page? has no attribute ...` from incomplete PyMuPDF stubs. Compare against this
 number rather than expecting zero: the rule in `AGENTS.md` is to resolve errors *in the

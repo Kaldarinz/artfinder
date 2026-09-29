@@ -25,15 +25,18 @@ from pathlib import Path
 from typing import Literal, cast
 from warnings import warn
 
+import numpy as np
 import pandas as pd
 import pymupdf
 from pymupdf import Page, Pixmap, Rect
+from scipy.optimize import linear_sum_assignment  # type: ignore[import-untyped]
 from sklearn.cluster import DBSCAN  # type: ignore[import-untyped]
 
 from artfinder.dataclasses import (
     DocumentElementsPDF,
     DrawingObjectPDF,
     FigureCaptionPDF,
+    FigureClusterPDF,
     FigurePDF,
     ImageInfoPDF,
     KeyedDict,
@@ -114,6 +117,42 @@ class ArticlePDF:
     MIN_FIGURE_IMAGE_OVERLAP = 0.9
     """Fraction of an image reaching above the bounds of a figure that must lie
     within them for the image to be part of the figure."""
+    FIGURE_GRAPHICS_GAP = 10.0
+    """Widest blank space, in points, between two drawings or images of one
+    cluster of graphics."""
+    FIGURE_LABEL_GAP = 15.0
+    """Widest blank space, in points, between a cluster of graphics and a label
+    set beside it. Wider than `FIGURE_GRAPHICS_GAP`: a rotated axis title stands
+    off from the tick labels by more than the graphics stand off each other."""
+    MIN_FIGURE_SIDE = 25.0
+    """Shortest a cluster of graphics may be on its longer side, in points, to
+    be a figure rather than a logo, an icon or a stroke of an equation."""
+    MAX_FIGURE_CAPTION_GAP = 120.0
+    """Widest blank space, in points, between a figure and its caption. Wide
+    enough for a side caption set flush with the page edge."""
+    MAX_FIGURE_PANEL_GAP = 40.0
+    """Widest blank space, in points, across which a figure takes in a cluster
+    of graphics no caption claimed — a panel set apart from the others."""
+    CAPTION_ABOVE_FIGURE_WEIGHT = 1.5
+    """Factor on the distance from a caption to a figure below it: a caption
+    sits under its figure more often than over it."""
+    SIDE_CAPTION_WEIGHT = 1.2
+    "Factor on the distance from a caption to a figure beside it."
+    MAX_HAIRLINE_WIDTH = 2.0
+    """Thickest a drawing may be, in points, to be a rule rather than an area."""
+    MIN_PAGE_RULE_LENGTH = 0.4
+    """Shortest a hairline may be, as a fraction of the page width, to be a
+    rule of the page — under a header, over the footnotes — rather than of a
+    figure."""
+    MAX_CAPTION_FIGURE_OVERLAP = 4.0
+    """How far, in points, a figure may reach past the edge of the caption it
+    faces and still count as above or below it."""
+    MAX_FIGURE_TEXT_OVERLAP = 0.2
+    """Largest fraction of a paragraph or caption a figure may cover when it
+    takes in a panel no caption claimed."""
+    WHITE_LEVEL = 0.97
+    """Lowest value every component of a colour must reach for it to be taken
+    as white, which leaves a drawing painted in it invisible on the page."""
     DOI_PATTERN = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
     "Pattern of a DOI in text. The prefix dot is literal: `1000/x` is not a DOI."
     CAPTION_PATTERN = re.compile(
@@ -226,6 +265,15 @@ class ArticlePDF:
             self._get_paragraphs_from_page
         )
         """Paragraph rectangles keyed by page number."""
+        self._figure_clusters_cache: dict[int, tuple[FigureClusterPDF, ...]] = (
+            KeyedDict(self._get_figure_clusters_from_page)
+        )
+        """Clusters of graphics that could make up figures, keyed by page number."""
+        self._figure_matches_cache: dict[int, dict[int, Rect]] = KeyedDict(
+            self._match_figures_on_page
+        )
+        """Figure rectangles found from their graphics, keyed by page number,
+        then by the index of their caption among the page's figure captions."""
         self._figures_cache: dict[int, tuple[FigurePDF, ...]] = KeyedDict(
             self._get_figures_from_page
         )
@@ -597,7 +645,7 @@ class ArticlePDF:
         The mirror of `header_rect`: whatever occupies the same place in the
         bottom band of at least `header_min_pages` distinct pages. It gives the
         elements that end at the bottom of a page — a table printed below its
-        caption, a figure with a side caption — something to stop against.
+        caption, a figure taking in its panels — something to stop against.
 
         Returns
         -------
@@ -643,6 +691,27 @@ class ArticlePDF:
             self._rect_key(rect)
             for rect, pages in pages_of_rect.items()
             if len(pages) >= self.header_min_pages
+        )
+
+    def _is_running_matter(self, rect: Rect) -> bool:
+        """
+        Internal method to tell whether a rectangle is page furniture.
+
+        Parameters
+        ----------
+        rect : Rect
+            Rectangle of a text block.
+
+        Returns
+        -------
+        bool
+            Whether the rectangle is among `_running_matter_rects`, compared on
+            the grid those are rounded to.
+        """
+
+        return (
+            self._rect_key(clip_to_grid(rect, self.RECTS_CLIP_PRECISION))
+            in self._running_matter_rects
         )
 
     @cached_property
@@ -2905,8 +2974,8 @@ class ArticlePDF:
                             # the same line and starts where the line so far
                             # ends — the line of the other column starts past a
                             # gutter. It is merged into that line rather than
-                            # added as a line of its own, which would make a
-                            # one-line caption pass for a multiline side caption.
+                            # added as a line of its own, which would break the
+                            # caption's text and its line count at the tail.
                             line_so_far = block.lines[-1]
                             same_line = min(
                                 next_line.rect.y1, last_rect.y1
@@ -3208,8 +3277,7 @@ class ArticlePDF:
                 and block.rect.x0 < caption.rect.x1
                 # Page furniture is not part of anything: what repeats at the
                 # same place on many pages, and whatever sits in the footer.
-                and self._rect_key(clip_to_grid(block.rect, self.RECTS_CLIP_PRECISION))
-                not in self._running_matter_rects
+                and not self._is_running_matter(block.rect)
                 and not (
                     not self.footer_rect.is_empty
                     and block.rect.y0 >= self.footer_rect.y0
@@ -3310,79 +3378,662 @@ class ArticlePDF:
             )
         return body
 
-    def _is_side_caption(self, page_no: int, caption_rect: Rect) -> bool:
+    @staticmethod
+    def _gap_between(rect: Rect, other: Rect) -> float:
+        """
+        Internal method to measure the blank space between two rectangles.
 
-        page_captions = self._figure_captions_cache[page_no]
-        page_caption = next(
-            caption for caption in page_captions if caption.rect == caption_rect
+        Parameters
+        ----------
+        rect : Rect
+            One rectangle. It may be degenerate — a hairline.
+        other : Rect
+            The other rectangle.
+
+        Returns
+        -------
+        float
+            The larger of the horizontal and vertical gaps between them, 0 if they
+            touch or overlap.
+        """
+
+        return max(
+            rect.x0 - other.x1,
+            other.x0 - rect.x1,
+            rect.y0 - other.y1,
+            other.y0 - rect.y1,
+            0.0,
         )
-        return (
-            caption_rect.width < self.paragraph_width.mean / 2
-            and page_caption.lines_no > 1
+
+    @staticmethod
+    def _span(rect: Rect, other: Rect) -> Rect:
+        """
+        Internal method to get the rectangle spanning two others.
+
+        Unlike `Rect.include_rect`, it takes a degenerate rectangle — a
+        hairline — into account.
+
+        Parameters
+        ----------
+        rect : Rect
+            One rectangle.
+        other : Rect
+            The other rectangle.
+
+        Returns
+        -------
+        Rect
+            The smallest rectangle holding both.
+        """
+
+        return Rect(
+            min(rect.x0, other.x0),
+            min(rect.y0, other.y0),
+            max(rect.x1, other.x1),
+            max(rect.y1, other.y1),
         )
+
+    @staticmethod
+    def _fraction_inside(rect: Rect, bounds: Rect) -> float:
+        """
+        Internal method to measure how much of a rectangle lies within bounds.
+
+        Parameters
+        ----------
+        rect : Rect
+            Rectangle to measure. A degenerate one — a hairline — lies either
+            wholly within or not at all.
+        bounds : Rect
+            Bounds to measure against.
+
+        Returns
+        -------
+        float
+            Fraction of the area of `rect` inside `bounds`.
+        """
+
+        if rect.is_empty:
+            inside = (
+                bounds.x0 <= rect.x0
+                and rect.x1 <= bounds.x1
+                and bounds.y0 <= rect.y0
+                and rect.y1 <= bounds.y1
+            )
+            return 1.0 if inside else 0.0
+        if not rect.intersects(bounds):
+            return 0.0
+        return Rect(rect).intersect(bounds).get_area() / rect.get_area()
+
+    def _is_visible_drawing(self, drawing: DrawingObjectPDF) -> bool:
+        """
+        Internal method to tell whether a drawing shows on the page.
+
+        A drawing painted white or fully transparent is a background, a mask
+        or a spacer — often laid under a caption or the whole of a figure —
+        and would join whatever lies near it into one figure.
+
+        Parameters
+        ----------
+        drawing : DrawingObjectPDF
+            Drawing to check.
+
+        Returns
+        -------
+        bool
+            Whether the drawing leaves a mark on the page.
+        """
+
+        def is_white(color: Sequence[float] | None) -> bool:
+            return color is None or all(value >= self.WHITE_LEVEL for value in color)
+
+        stroked = (
+            drawing.type in ("s", "fs")
+            and drawing.stroke_opacity > 0
+            and not is_white(drawing.color)
+        )
+        filled = (
+            drawing.type in ("f", "fs")
+            and drawing.fill_opacity > 0
+            and not is_white(drawing.fill)
+        )
+        return stroked or filled
+
+    def _get_figure_graphics(
+        self,
+        page_no: int,
+        caption_rects: Sequence[Rect],
+        paragraph_rects: Sequence[Rect],
+    ) -> list[Rect]:
+        """
+        Internal method to get the drawings and images a figure can be made of.
+
+        Left out are what only looks like part of a figure: the page furniture
+        in the header and footer bands, a table's ruling, a rule of the page
+        (a hairline most of the page wide), decoration bleeding off the page
+        edge, a frame drawn around text or a border beside a caption, anything
+        invisible (see `_is_visible_drawing`) and a background lying mostly
+        under a caption.
+        An image whose blank margin runs under its caption is cut short at the
+        caption instead.
+
+        Parameters
+        ----------
+        page_no : int
+            Page number (0-indexed).
+        caption_rects : Sequence[Rect]
+            Figure and table captions of the page.
+        paragraph_rects : Sequence[Rect]
+            Paragraphs of the page.
+
+        Returns
+        -------
+        list[Rect]
+            Rectangles of the drawings and images, as copies.
+        """
+
+        page_rect = cast(Rect, self.file[page_no].rect)  # type: ignore[attr-defined]
+        page_area = page_rect.get_area()
+        table_rects = self.get_table_rects(page_no, copy_rects=False)
+        # Each candidate goes with the width of the stroke it is painted with:
+        # a line of a plot can be drawn thicker than its path is wide.
+        candidates = [
+            (copy(drawing.rect), drawing.width if drawing.type in ("s", "fs") else 0.0)
+            for drawing in self._drawings_cache[page_no]
+            if self._is_visible_drawing(drawing)
+        ]
+        candidates += [(rect, 0.0) for rect in self.get_image_rects(page_no)]
+
+        result: list[Rect] = []
+        for rect, stroke_width in candidates:
+            if rect.get_area() > page_area * self.MAX_IMAGE_AREA:
+                continue
+            if (
+                rect.x0 < page_rect.x0 - self.MARGIN
+                or rect.y0 < page_rect.y0 - self.MARGIN
+                or rect.x1 > page_rect.x1 + self.MARGIN
+                or rect.y1 > page_rect.y1 + self.MARGIN
+            ):
+                continue
+            if (
+                max(min(rect.width, rect.height), stroke_width) < self.MAX_HAIRLINE_WIDTH
+                and max(rect.width, rect.height)
+                > page_rect.width * self.MIN_PAGE_RULE_LENGTH
+            ):
+                continue
+            if not self.header_rect.is_empty and rect.y1 <= self.header_rect.y1 + self.MARGIN:
+                continue
+            if not self.footer_rect.is_empty and rect.y0 >= self.footer_rect.y0 - self.MARGIN:
+                continue
+            if any(
+                self._fraction_inside(rect, table) > self.MIN_TABLE_RULING_OVERLAP
+                for table in table_rects
+            ):
+                continue
+            if any(rect.contains(text) for text in chain(caption_rects, paragraph_rects)):
+                continue
+            if min(rect.width, rect.height) < self.MAX_HAIRLINE_WIDTH and any(
+                self._is_beside(rect, caption)
+                and self._gap_between(rect, caption) <= self.FIGURE_GRAPHICS_GAP
+                for caption in caption_rects
+            ):
+                continue
+            if any(
+                self._fraction_inside(rect, caption) > 0.5 for caption in caption_rects
+            ):
+                continue
+            for caption in caption_rects:
+                if not rect.intersects(caption):
+                    continue
+                if rect.y0 + rect.y1 < caption.y0 + caption.y1:
+                    rect.y1 = min(rect.y1, caption.y0)
+                else:
+                    rect.y0 = max(rect.y0, caption.y1)
+            result.append(rect)
+        return result
+
+    def _column_gutter_middle(self, page_no: int) -> float | None:
+        """
+        Internal method to locate the middle of the column gutter of a page.
+
+        Parameters
+        ----------
+        page_no : int
+            Page number (0-indexed).
+
+        Returns
+        -------
+        float | None
+            Middle of the gap between the right edge of the left column and
+            the left edge of the right column, or None unless the document is
+            set in two columns and the page carries paragraphs in both.
+        """
+
+        if self.columns_number != 2:
+            return None
+        page_width = cast(Rect, self.file[page_no].rect).width  # type: ignore[attr-defined]
+        paragraph_rects = self.get_paragraph_rects(page_no, copy_rects=False)
+        left_columns_x1 = [rect.x1 for rect in paragraph_rects if rect.x1 < page_width * 0.6]
+        right_columns_x0 = [rect.x0 for rect in paragraph_rects if rect.x0 > page_width * 0.4]
+        if not left_columns_x1 or not right_columns_x0:
+            return None
+        return (max(left_columns_x1) + min(right_columns_x0)) / 2
+
+    def _is_figure_label(
+        self,
+        block: TextBlockPDF,
+        caption_rects: Sequence[Rect],
+        paragraph_rects: Sequence[Rect],
+    ) -> bool:
+        """
+        Internal method to tell whether a text block could be set in a figure.
+
+        Axis labels, legends and panel letters are short: running text is not,
+        and neither is text belonging to a paragraph or a caption, nor the page
+        furniture — a running head can be merged with what follows it into one
+        block reaching below the header band. An axis title can be as long as a
+        line of running text, but it is a single line set in a typeface other
+        than the body's.
+
+        Parameters
+        ----------
+        block : TextBlockPDF
+            Block to check.
+        caption_rects : Sequence[Rect]
+            Figure and table captions of the page.
+        paragraph_rects : Sequence[Rect]
+            Paragraphs of the page.
+
+        Returns
+        -------
+        bool
+            Whether the block can be a label of a figure.
+        """
+
+        rect = block.rect
+        if self._is_prose(block) and (
+            len(block.lines) > 1 or self._is_body_text(block)
+        ):
+            return False
+        if rect.intersects(self.header_rect) or rect.intersects(self.footer_rect):
+            return False
+        if self._is_running_matter(rect):
+            return False
+        if any(rect.intersects(caption) for caption in caption_rects):
+            return False
+        return not any(
+            self._fraction_inside(rect, paragraph) > 0.5 for paragraph in paragraph_rects
+        )
+
+    def _merge_clusters(
+        self, clusters: Iterable[FigureClusterPDF]
+    ) -> list[FigureClusterPDF]:
+        """
+        Internal method to merge clusters lying within `FIGURE_GRAPHICS_GAP` of each other.
+
+        Parameters
+        ----------
+        clusters : Iterable[FigureClusterPDF]
+            Clusters to merge. They are merged in place.
+
+        Returns
+        -------
+        list[FigureClusterPDF]
+            The clusters left, no two of them within reach of each other.
+        """
+
+        result = list(clusters)
+        merged = True
+        while merged:
+            merged = False
+            kept: list[FigureClusterPDF] = []
+            for cluster in sorted(result, key=lambda c: (c.reach.y0, c.reach.x0)):
+                for other in kept:
+                    if (
+                        self._gap_between(other.reach, cluster.reach)
+                        <= self.FIGURE_GRAPHICS_GAP
+                    ):
+                        other.reach = self._span(other.reach, cluster.reach)
+                        other.rect.include_rect(cluster.rect)
+                        merged = True
+                        break
+                else:
+                    kept.append(cluster)
+            result = kept
+        return result
+
+    def _get_figure_clusters_from_page(
+        self, page_no: int
+    ) -> tuple[FigureClusterPDF, ...]:
+        """
+        Internal method to group the graphics of a page into clusters.
+
+        Graphics (see `_get_figure_graphics`) lying within `FIGURE_GRAPHICS_GAP`
+        of each other are one cluster. A cluster then takes in the text set
+        within `FIGURE_LABEL_GAP` of it that can be a label (see
+        `_is_figure_label`), except for text in the body font above it — the
+        heading of the section the figure opens — and, on a two-column page,
+        text across the column gutter from a cluster confined to one column: a
+        panel letter of the figure in the next column can lie nearer to this
+        one than to its own. Clusters too small to be a figure are dropped.
+
+        Parameters
+        ----------
+        page_no : int
+            Page number (0-indexed).
+
+        Returns
+        -------
+        tuple[FigureClusterPDF, ...]
+            Clusters of the page.
+        """
+
+        caption_rects = [
+            *self.get_figure_caption_rects(page_no, copy_rects=False),
+            *self.get_table_caption_rects(page_no, copy_rects=False),
+        ]
+        paragraph_rects = self.get_paragraph_rects(page_no, copy_rects=False)
+        clusters = self._merge_clusters(
+            FigureClusterPDF(reach=copy(rect), rect=copy(rect))
+            for rect in self._get_figure_graphics(page_no, caption_rects, paragraph_rects)
+        )
+
+        gutter = self._column_gutter_middle(page_no)
+        labels = [
+            block
+            for block in self._text_cache[page_no]
+            if self._is_figure_label(block, caption_rects, paragraph_rects)
+        ]
+        # A label can bring a cluster within reach of the next label, or of
+        # another cluster: a few rounds settle it.
+        for _ in range(3):
+            added = False
+            for block in labels:
+                rect = block.rect
+                for cluster in clusters:
+                    if cluster.reach.contains(rect):
+                        cluster.rect.include_rect(rect)
+                        break
+                    if self._gap_between(cluster.reach, rect) > self.FIGURE_LABEL_GAP:
+                        continue
+                    if gutter is not None and not (
+                        cluster.reach.x0 < gutter < cluster.reach.x1
+                    ):
+                        in_left_column = cluster.reach.x1 <= gutter
+                        if in_left_column != (rect.x0 + rect.x1 <= 2 * gutter):
+                            continue
+                    if self._is_body_text(block) and rect.y1 <= cluster.reach.y0:
+                        continue
+                    cluster.reach = self._span(cluster.reach, rect)
+                    cluster.rect.include_rect(rect)
+                    added = True
+                    break
+            clusters = self._merge_clusters(clusters)
+            if not added:
+                break
+
+        result: list[FigureClusterPDF] = []
+        for cluster in clusters:
+            reach = cluster.reach
+            if max(reach.width, reach.height) < self.MIN_FIGURE_SIDE:
+                continue
+            if min(reach.width, reach.height) < self.MAX_HAIRLINE_WIDTH:
+                continue
+            if cluster.rect.is_empty:
+                cluster.rect = copy(reach)
+            result.append(cluster)
+        return tuple(result)
+
+    def _caption_distance(self, figure_rect: Rect, caption_rect: Rect) -> float | None:
+        """
+        Internal method to measure how far a caption is from a figure it could belong to.
+
+        Parameters
+        ----------
+        figure_rect : Rect
+            Rectangle of the figure.
+        caption_rect : Rect
+            Rectangle of the caption.
+
+        Returns
+        -------
+        float | None
+            The blank space between them, weighted by how often a caption is set
+            that way round (see `CAPTION_ABOVE_FIGURE_WEIGHT`,
+            `SIDE_CAPTION_WEIGHT`), or None if the caption is neither above,
+            below nor beside the figure.
+        """
+
+        overlaps_horizontally = min(figure_rect.x1, caption_rect.x1) > max(
+            figure_rect.x0, caption_rect.x0
+        )
+        if overlaps_horizontally:
+            if figure_rect.y1 <= caption_rect.y0 + self.MAX_CAPTION_FIGURE_OVERLAP:
+                return max(caption_rect.y0 - figure_rect.y1, 0.0)
+            if figure_rect.y0 >= caption_rect.y1 - self.MAX_CAPTION_FIGURE_OVERLAP:
+                return (
+                    max(figure_rect.y0 - caption_rect.y1, 0.0)
+                    * self.CAPTION_ABOVE_FIGURE_WEIGHT
+                )
+        if self._is_beside(figure_rect, caption_rect):
+            return (
+                max(caption_rect.x0 - figure_rect.x1, figure_rect.x0 - caption_rect.x1, 0.0)
+                * self.SIDE_CAPTION_WEIGHT
+            )
+        return None
+
+    @staticmethod
+    def _is_beside(figure_rect: Rect, caption_rect: Rect) -> bool:
+        """
+        Internal method to tell whether a caption is set beside a figure.
+
+        Parameters
+        ----------
+        figure_rect : Rect
+            Rectangle of the figure.
+        caption_rect : Rect
+            Rectangle of the caption.
+
+        Returns
+        -------
+        bool
+            Whether the two share most of the height of the shorter one.
+        """
+
+        shared_height = min(figure_rect.y1, caption_rect.y1) - max(
+            figure_rect.y0, caption_rect.y0
+        )
+        return shared_height > 0.5 * min(figure_rect.height, caption_rect.height)
+
+    @staticmethod
+    def _is_separated(rect: Rect, other: Rect, obstacles: Iterable[Rect]) -> bool:
+        """
+        Internal method to tell whether text stands between two rectangles.
+
+        Parameters
+        ----------
+        rect : Rect
+            One rectangle.
+        other : Rect
+            The other rectangle.
+        obstacles : Iterable[Rect]
+            Paragraphs and captions that can stand between them.
+
+        Returns
+        -------
+        bool
+            Whether most of an obstacle touching neither lies in the rectangle
+            spanning both.
+        """
+
+        span = ArticlePDF._span(rect, other)
+        for obstacle in obstacles:
+            if obstacle.intersects(rect) or obstacle.intersects(other):
+                continue
+            if ArticlePDF._fraction_inside(obstacle, span) > 0.5:
+                return True
+        return False
+
+    def _match_figures_on_page(self, page_no: int) -> dict[int, Rect]:
+        """
+        Internal method to pair the figure captions of a page with its graphics.
+
+        Every caption takes a cluster of graphics above, below or beside it
+        (see `_caption_distance`) that no paragraph or caption separates from
+        it. The pairs are chosen together rather than nearest first: as many
+        captions as possible get a figure, and among those pairings the one
+        with the least distance in total wins. A caption set between two
+        figures lies nearer to the figure it does not belong to often enough —
+        the next figure starts right under it — and taking the nearest would
+        leave the other caption with none. Each figure then takes in the clusters no
+        caption claimed that lie within `MAX_FIGURE_PANEL_GAP` of it, provided it
+        covers no text, other figure or page furniture in doing so — the panels
+        of a figure set further apart than `FIGURE_GRAPHICS_GAP`. A caption
+        whose figure sits at the foot of the previous page takes part in
+        neither.
+
+        Parameters
+        ----------
+        page_no : int
+            Page number (0-indexed).
+
+        Returns
+        -------
+        dict[int, Rect]
+            Figure rectangles keyed by the index of their caption among the
+            figure captions of the page. A caption no cluster answers to is left
+            out.
+        """
+
+        captions = self._figure_captions_cache[page_no]
+        clusters = self._figure_clusters_cache[page_no]
+        obstacles = [
+            *self.get_paragraph_rects(page_no, copy_rects=False),
+            *self.get_figure_caption_rects(page_no, copy_rects=False),
+            *self.get_table_caption_rects(page_no, copy_rects=False),
+        ]
+
+        # A pair that cannot be made costs more than every pair that can put
+        # together, so that as many captions as possible find a figure before
+        # the distances are weighed at all.
+        unmatched = (len(captions) + 1) * self.MAX_FIGURE_CAPTION_GAP * max(
+            1.0, self.CAPTION_ABOVE_FIGURE_WEIGHT, self.SIDE_CAPTION_WEIGHT
+        )
+        costs = np.full((len(captions), len(clusters)), unmatched)
+        for caption_index, caption in enumerate(captions):
+            if self._figure_rect_on_previous_page(page_no, caption) is not None:
+                continue
+            for cluster_index, cluster in enumerate(clusters):
+                distance = self._caption_distance(cluster.reach, caption.rect)
+                if distance is None or distance > self.MAX_FIGURE_CAPTION_GAP:
+                    continue
+                if self._is_separated(cluster.reach, caption.rect, obstacles):
+                    continue
+                costs[caption_index, cluster_index] = distance
+
+        figures: dict[int, FigureClusterPDF] = {}
+        claimed: set[int] = set()
+        for caption_index, cluster_index in zip(*linear_sum_assignment(costs)):
+            if costs[caption_index, cluster_index] >= unmatched:
+                continue
+            cluster = clusters[cluster_index]
+            figures[int(caption_index)] = FigureClusterPDF(
+                reach=copy(cluster.reach), rect=copy(cluster.rect)
+            )
+            claimed.add(int(cluster_index))
+
+        grown = True
+        while grown:
+            grown = False
+            for cluster_index, cluster in enumerate(clusters):
+                if cluster_index in claimed:
+                    continue
+                if cluster.reach.intersects(self.header_rect) or cluster.reach.intersects(
+                    self.footer_rect
+                ):
+                    continue
+                nearest: tuple[float, int] | None = None
+                for caption_index, figure in figures.items():
+                    gap = self._gap_between(figure.reach, cluster.reach)
+                    if gap > self.MAX_FIGURE_PANEL_GAP:
+                        continue
+                    span = self._span(figure.reach, cluster.reach)
+                    if any(
+                        self._fraction_inside(obstacle, span) > self.MAX_FIGURE_TEXT_OVERLAP
+                        for obstacle in obstacles
+                    ):
+                        continue
+                    if any(
+                        other is not figure and span.intersects(other.reach)
+                        for other in figures.values()
+                    ):
+                        continue
+                    if nearest is None or gap < nearest[0]:
+                        nearest = (gap, caption_index)
+                if nearest is not None:
+                    figure = figures[nearest[1]]
+                    figure.reach = self._span(figure.reach, cluster.reach)
+                    figure.rect.include_rect(cluster.rect)
+                    claimed.add(cluster_index)
+                    grown = True
+
+        return {index: figure.rect for index, figure in figures.items()}
 
     def _get_figures_from_page(
         self,
         page_no: int,
     ) -> tuple[FigurePDF, ...]:
-        """Internal method to get figure rectangles from a single page."""
+        """
+        Internal method to get the figures of a single page.
 
-        # Figure can cantain images, drawings and text.
-        # This function determines bounding box of the figures on the page.
-        # Algorithm:
-        # 1. First, we determine maximum bounds of the figure as follows:
-        #   1.1 Lower bound is upper bound of figure caption
-        #   1.2 Upper bound is minimum value of lower bounds of:
-        #       1.2.1 Text paragraph, which located above the figure caption
-        #       1.2.2 Another figure caption, which is located above the figure caption
-        #       1.2.3 Page header, which is located above the figure caption
-        #   1.3 Left and right bounds should ba adjusted only if article layout is
-        #   multicolumn.
-        #   1.4 A figure narrowed to one column in 1.3 that holds an element
-        #   crossing the gutter is bounded again as a full-width figure: a short
-        #   caption is no evidence that the figure it belongs to is short too.
-        # Some figures have their captions located on the left or right side.
-        # There is a heuristic to determine whether caption is side caption:
-        # Width of caption is less than 50% of paragraph width and has maltiple lines.
-        # There is another heuristic which can help to parse such figures:
-        # If caption is side caption, then figure takes all width of the page
-        # regardless of number of columns.
+        A figure is found from what it is made of: the clusters of graphics on
+        the page are paired with the captions next to them (see
+        `_match_figures_on_page`), whichever side of the figure the caption is
+        set on. A caption no cluster answers to — on a scanned page, or under a
+        figure drawn in text — is bounded from the caption instead
+        (`_bound_figure_rect`): its lower bound is the caption, its upper bound
+        the nearest paragraph, caption, figure or header above it, and its
+        sides are narrowed to the caption's column in a two-column document.
+        A figure whose caption was carried over to the top of the next page is
+        stored on this page, where it is drawn.
 
-        result: list[FigurePDF] = []
+        Parameters
+        ----------
+        page_no : int
+            Page number (0-indexed).
+
+        Returns
+        -------
+        tuple[FigurePDF, ...]
+            Figures drawn on the page.
+        """
+
         page = self.file[page_no]
         figure_captions = self._figure_captions_cache[page_no]
+        matches = self._figure_matches_cache[page_no]
+        matched = {
+            index: FigurePDF(copy(rect), figure_captions[index])
+            for index, rect in matches.items()
+        }
 
-        # First we should find all figures with side captions
-        side_capt_figures: list[FigurePDF] = []
-
-        for caption in figure_captions:
-            if self._is_side_caption(page_no, caption.rect):
-                figure_rect = self._get_figure_rects_side_caption(
-                    page_no=page_no, caption_rect=caption.rect
-                )
-                side_capt_figures.append(FigurePDF(figure_rect, caption))
-
-        for caption in figure_captions:
-            # skip side captions
-            if self._is_side_caption(page_no, caption.rect):
+        result: list[FigurePDF] = []
+        for index, caption in enumerate(figure_captions):
+            if index in matched:
+                result.append(matched[index])
                 continue
             # The figure was printed at the foot of the previous page, and is
             # bounded there.
             if self._figure_rect_on_previous_page(page_no, caption) is not None:
                 continue
-
             if self.columns_number > 2:
                 warn(
                     f"Document {page.parent} page {page.number} has more than 2 columns. "
-                    "Only 2 columns are supported for figure extraction."
+                    "Only 2 columns are supported for figures bounded from their caption."
                 )
-                result.extend(side_capt_figures)
-                return tuple(result)
+                continue
 
             figure_rect, gutter = self._bound_figure_rect(
-                page_no, caption, side_capt_figures, full_width=False
+                page_no, caption, list(matched.values()), full_width=False
             )
-
             # A figure narrowed to one column that nevertheless holds an element
             # running across the gutter spans both columns after all — its caption
             # was merely too short to say so. Bound it again as a full-width
@@ -3392,20 +4043,23 @@ class ArticlePDF:
                 page_no, figure_rect, gutter
             ):
                 figure_rect, _ = self._bound_figure_rect(
-                    page_no, caption, side_capt_figures, full_width=True
+                    page_no, caption, list(matched.values()), full_width=True
                 )
+            result.append(
+                FigurePDF(self._refine_figure_rect(page_no, figure_rect), caption)
+            )
 
-            result.append(FigurePDF(figure_rect, caption))
-        result.extend(side_capt_figures)
         if page_no + 1 < self.file.page_count:
             for caption in self._figure_captions_cache[page_no + 1]:
                 prev_page_rect = self._figure_rect_on_previous_page(
                     page_no + 1, caption
                 )
                 if prev_page_rect is not None:
-                    result.append(FigurePDF(prev_page_rect, caption))
-        for i in range(len(result)):
-            result[i].rect = self._refine_figure_rect(page_no, result[i].rect)
+                    result.append(
+                        FigurePDF(
+                            self._refine_figure_rect(page_no, prev_page_rect), caption
+                        )
+                    )
         return tuple(result)
 
     def _figure_rect_on_previous_page(
@@ -3420,7 +4074,8 @@ class ArticlePDF:
         leaves the figure at the foot of one page and carries the caption over
         to the top of the next. Such a caption has nothing above it but the
         running head, and the previous page ends in graphics below its last
-        paragraph or caption.
+        paragraph or caption. A caption with graphics beside it is a side
+        caption at the top of its page instead, and belongs to them.
 
         Parameters
         ----------
@@ -3436,7 +4091,12 @@ class ArticlePDF:
             figure is on the caption's own page.
         """
 
-        if page_no == 0 or self._is_side_caption(page_no, caption.rect):
+        if page_no == 0:
+            return None
+        if any(
+            self._is_beside(cluster.reach, caption.rect)
+            for cluster in self._figure_clusters_cache[page_no]
+        ):
             return None
 
         page_rect = cast(Rect, self.file[page_no].rect)  # type: ignore[attr-defined]
@@ -3448,9 +4108,7 @@ class ArticlePDF:
             self.get_drawing_rects(page_no, copy_rects=False),
             self.get_image_rects(page_no, copy_rects=False),
         ):
-            if above_caption.contains(rect) and (
-                self._rect_key(rect) not in self._running_matter_rects
-            ):
+            if above_caption.contains(rect) and not self._is_running_matter(rect):
                 return None
 
         prev_page_no = page_no - 1
@@ -3484,7 +4142,7 @@ class ArticlePDF:
         self,
         page_no: int,
         caption: FigureCaptionPDF,
-        side_capt_figures: Sequence[FigurePDF],
+        other_figures: Sequence[FigurePDF],
         full_width: bool,
     ) -> tuple[Rect, tuple[float, float] | None]:
         """
@@ -3496,9 +4154,10 @@ class ArticlePDF:
             Page number (0-indexed) the caption sits on.
         caption : FigureCaptionPDF
             Caption of the figure to bound.
-        side_capt_figures : Sequence[FigurePDF]
-            Figures on the page whose captions sit beside them, already bounded.
-            They take part as upper-bound candidates.
+        other_figures : Sequence[FigurePDF]
+            Figures of the page already bounded from their graphics. Those above
+            the caption and over part of its width take part as upper-bound
+            candidates.
         full_width : bool
             Bound the figure as spanning every column: neither the upper bound
             nor the sides are restricted to the caption's own column.
@@ -3577,8 +4236,10 @@ class ArticlePDF:
         upper_bound_candidates.extend(
             [
                 figure.rect
-                for figure in side_capt_figures
+                for figure in other_figures
                 if figure.rect.y1 < caption.rect.y0
+                and figure.rect.x0 < caption.rect.x1
+                and caption.rect.x0 < figure.rect.x1
             ]
         )
 
@@ -3669,7 +4330,7 @@ class ArticlePDF:
             # `header_rect`, which is a band of the page rather than the block.
             if rect.intersects(self.header_rect) or rect.intersects(self.footer_rect):
                 continue
-            if self._rect_key(rect) in self._running_matter_rects:
+            if self._is_running_matter(rect):
                 continue
             if rect.x0 < gutter_left and rect.x1 > gutter_right:
                 return True
@@ -3751,82 +4412,3 @@ class ArticlePDF:
         for rect in rects:
             refined_rect.include_rect(rect)
         return refined_rect
-
-    def _get_figure_rects_side_caption(
-        self,
-        page_no: int,
-        caption_rect: Rect,
-    ) -> Rect:
-        """Internal method to get figure rect for side captions."""
-
-        # The hardest task for such images is to determine upper and lower boundaries.
-        # The upper boundary can be:
-        # 1. Bottom of text paragraph above
-        # 2. Page header
-        # 3. Bottom of figure/table caption
-        # 4. Bottom of another figure
-        # The lower boundary can be:
-        # 1. Top of text paragraph below
-        # 2. Page footer
-        # 3. Top of another figure
-        #
-        # The following heuristics is used: figure capture should be aligned to the top
-        # or bottom of the image. Therefore we first check is there any objects above and below
-        # the capture (all page wide is checked).
-
-        # Determine initial side boundaries
-        page = self.file[page_no]
-        figure_rect = copy(page.rect)
-        left_bound, right_bound = self._line_number_gutter(page_no)
-        if caption_rect.x0 > page.rect.width / 2:
-            figure_rect.x0 = max(self.MARGIN, left_bound)
-            figure_rect.x1 = min(caption_rect.x0 - self.MARGIN, right_bound)
-        else:
-            figure_rect.x0 = max(caption_rect.x1 + self.MARGIN, left_bound)
-            figure_rect.x1 = min(page.rect.width - self.MARGIN, right_bound)
-
-        # Check if figure caption is aligned at bottom of the figure
-        test_rect = Rect(
-            self.MARGIN,
-            caption_rect.y1 + self.MARGIN,
-            page.rect.width - self.MARGIN,
-            caption_rect.y1 + 2 * self.MARGIN,
-        )
-        text_rects = self.get_text_rects(page_no)
-        drawing_rects = self.get_drawing_rects(page_no)
-        image_rects = self.get_image_rects(page_no)
-        has_no_objects = True
-        for obj in chain(text_rects, drawing_rects, image_rects):
-            if test_rect.intersects(obj):
-                has_no_objects = False
-                break
-
-        caption_rects = self.get_figure_caption_rects(page_no)
-        paragraph_rects = self.get_paragraph_rects(page_no)
-        # If we did not found any objects below, then capture is bottom-aligned
-        if has_no_objects:
-            figure_rect.y1 = caption_rect.y1 + self.MARGIN
-
-            upper_bound_candidates = [
-                rect
-                for rect in chain(caption_rects, paragraph_rects, [self.header_rect])
-                if rect and rect.y1 < caption_rect.y0
-            ]
-            if upper_bound_candidates:
-                figure_rect.y0 = (
-                    max(upper_bound_candidates, key=lambda x: x.y1).y1 + self.MARGIN
-                )
-        # Otherwise caption is top aligned
-        else:
-            figure_rect.y0 = caption_rect.y0 - self.MARGIN
-            lower_bound_candidates = [
-                rect
-                for rect in chain(caption_rects, paragraph_rects)
-                if rect and rect.y0 > caption_rect.y1
-            ]
-            if lower_bound_candidates:
-                figure_rect.y1 = (
-                    min(lower_bound_candidates, key=lambda x: x.y0).y0 - self.MARGIN
-                )
-
-        return figure_rect

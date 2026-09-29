@@ -664,6 +664,19 @@ class FigurePDF:
 
 
 @dataclass
+class FigureClusterPDF:
+    """Graphics lying close together on a page, with the labels set among them."""
+
+    reach: Rect
+    """Extent of every member, hairlines included. Distances to other elements
+    are measured from it: an axis line joins the tick labels to the plot."""
+    rect: Rect
+    """Extent of the members that cover an area — what a figure made of the
+    cluster is reported as. A hairline has none and does not widen it, the way
+    `Rect.include_rect` leaves it out everywhere else."""
+
+
+@dataclass
 class TablePDF:
     rect: Rect
     "Rectangle of the table body, without its caption."

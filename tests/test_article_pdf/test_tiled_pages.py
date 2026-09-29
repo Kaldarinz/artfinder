@@ -135,9 +135,10 @@ class TestTiledPage:
         """Test that a caption cut to one strip no longer passes for a side caption."""
 
         with ArticlePDF(TILED_PDF) as article:
-            article.figure_captions
-            for caption in article._figure_captions_cache[TILED_PAGE]:
-                assert not article._is_side_caption(TILED_PAGE, caption.rect)
+            figures = article.get_figures(TILED_PAGE)
+            assert figures
+            for figure in figures.values():
+                assert figure.rect.y1 <= figure.caption.rect.y0
 
     def test_body_text_is_read_as_paragraphs(self) -> None:
         """Test that the body text of the tiled page is found as paragraphs."""
