@@ -179,19 +179,38 @@ class CrossrefArticle(Article):
         return link_list
 
     def _extract_funder(self, data: dict[str, Any]) -> List[dict[str, str | None]]:
-        """Extract the funder info from the data."""
+        """
+        Extract the funders from the data, one record per award.
 
-        funder_list_raw = data.get("funder", [])
-        funder_list = []
-        for funder in funder_list_raw:
-            funder_new = {}
+        A Crossref funder record may list several awards; each becomes a record
+        of its own carrying the funder's `name` and `doi` and one `number`, in
+        the order Crossref lists them. A funder with no awards gives a single
+        record without `number`. Award strings are kept exactly as deposited.
+
+        Parameters
+        ----------
+        data : dict[str, Any]
+            Crossref work record.
+
+        Returns
+        -------
+        List[dict[str, str | None]]
+            Funder records with keys `name`, `doi` and `number`, each present
+            only when Crossref gives it.
+        """
+
+        funder_list: List[dict[str, str | None]] = []
+        for funder in data.get("funder", []):
+            funder_base: dict[str, str | None] = {}
             if funder.get("name"):
-                funder_new["name"] = funder.get("name")
+                funder_base["name"] = funder["name"]
             if funder.get("DOI"):
-                funder_new["doi"] = funder.get("DOI")
-            if len(funder.get("award", [])):
-                funder_new["number"] = funder.get("award")[0]
-            funder_list.append(funder_new)
+                funder_base["doi"] = funder["DOI"]
+            awards = funder.get("award") or []
+            if not awards:
+                funder_list.append(funder_base)
+            for award in awards:
+                funder_list.append({**funder_base, "number": award})
         return funder_list
 
     def _extract_journal(self, data: dict[str, Any]) -> str | None:

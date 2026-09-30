@@ -294,3 +294,53 @@ class TestOrganisationSections:
         record = _record(author=SECTIONED_AUTHORS)
         CrossrefArticle(record)
         assert record["author"] == SECTIONED_AUTHORS
+
+
+class TestFunderAwards:
+    """Each award of a funder becomes a funder record of its own."""
+
+    def test_two_awards_give_two_records(self) -> None:
+        """Both awards are kept, in Crossref's order, as deposited."""
+        record = _record(
+            funder=[
+                {
+                    "name": "Russian Science Foundation",
+                    "DOI": "10.13039/501100006769",
+                    "award": ["20-72-00081", "no. FSWU-2020-0035"],
+                }
+            ]
+        )
+        assert _row(record)["funders"] == [
+            {
+                "name": "Russian Science Foundation",
+                "doi": "10.13039/501100006769",
+                "number": "20-72-00081",
+            },
+            {
+                "name": "Russian Science Foundation",
+                "doi": "10.13039/501100006769",
+                "number": "no. FSWU-2020-0035",
+            },
+        ]
+
+    def test_one_award_gives_one_record(self) -> None:
+        """A single award gives a single record, its backslashes kept."""
+        record = _record(
+            funder=[{"name": "Royal Society", "award": ["rsrp\\r\\190000"]}]
+        )
+        assert _row(record)["funders"] == [
+            {"name": "Royal Society", "number": "rsrp\\r\\190000"}
+        ]
+
+    def test_no_awards_give_one_record_without_number(self) -> None:
+        """A funder with a missing or empty award list is listed once."""
+        record = _record(
+            funder=[
+                {"name": "National Science Foundation"},
+                {"name": "European Research Council", "award": []},
+            ]
+        )
+        assert _row(record)["funders"] == [
+            {"name": "National Science Foundation"},
+            {"name": "European Research Council"},
+        ]
