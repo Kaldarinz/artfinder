@@ -8,6 +8,7 @@ This module is a part of the Artfinder package.
 """
 
 import logging
+import re
 
 from artfinder.dataclasses import CrossrefResource
 
@@ -66,3 +67,28 @@ def build_cr_endpoint(
     complete_url = f"https://{CROSSREF_API_BASE}/{endpoint_path}"
 
     return complete_url
+
+FUNDER_REGISTRY_ID_PATTERN = re.compile(r"10\.13039/([^/\s]+)$", re.IGNORECASE)
+"Funder Registry DOI, bare or as a URL; the group is the funder id."
+
+
+def funder_registry_id(doi: str | None) -> str | None:
+    """
+    Get the Funder Registry id from a funder DOI.
+
+    Parameters
+    ----------
+    doi : str | None
+        Funder DOI as deposited, e.g. `10.13039/501100001823` or
+        `https://doi.org/10.13039/501100001823`.
+
+    Returns
+    -------
+    str | None
+        The id, `501100001823`, or None when the DOI is not a Funder Registry one.
+    """
+
+    if not doi:
+        return None
+    match = FUNDER_REGISTRY_ID_PATTERN.search(doi.strip())
+    return match.group(1) if match else None

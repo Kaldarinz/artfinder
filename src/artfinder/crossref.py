@@ -10,7 +10,7 @@ This module is part of the Artfinder package.
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime, date
-from typing import Any, Self, TypeVar, cast, Generator
+from typing import Any, ClassVar, Self, TypeVar, cast, Generator
 import logging
 
 import requests
@@ -20,9 +20,10 @@ from artfinder.dataclasses import (
     CrossrefResource,
     CrossrefQueryField,
     DocumentType,
+    FunderRegistryEntry,
 )
 from artfinder.http_requests import AsyncHTTPRequest
-from artfinder.crossref_helpers import build_cr_endpoint
+from artfinder.crossref_helpers import build_cr_endpoint, funder_registry_id
 from artfinder.article import CrossrefArticle, ArticleCollection
 from artfinder.helpers import LinePrinter, MultiLinePrinter
 
@@ -186,7 +187,8 @@ class Endpoint(ABC):
                 params=self.request_params,
                 print_progress=False,
             )
-            if result is None:
+            # `get` returns an empty dict, not None, when the request fails.
+            if "message" not in result:
                 self.status_line("Found nothing.")
                 return
             self.status_line(f"Fetched {len(result['message']['items'])} items.")
@@ -206,8 +208,14 @@ class Endpoint(ABC):
                     print_progress=False,
                 )
 
-                if result is None:
-                    self.status_line("Found nothing.")
+                if "message" not in result:
+                    if items_obtained:
+                        logger.warning(
+                            f"Request failed after {items_obtained} items; "
+                            "the results are incomplete."
+                        )
+                    else:
+                        self.status_line("Found nothing.")
                     return
 
                 if len(result["message"]["items"]) == 0:
@@ -253,6 +261,11 @@ class Endpoint(ABC):
 class Crossref(Endpoint):
     """Wrap around the Crossref API."""
 
+    _funder_registry: ClassVar[dict[str, FunderRegistryEntry]] = {}
+    """Funder Registry entries fetched so far, by funder id. Shared by every
+    instance: many works name the same funder, and every chained query method
+    returns a new instance."""
+
     @property
     def RESOURCE(self) -> CrossrefResource:
         """works endpoint."""
@@ -265,7 +278,76 @@ class Crossref(Endpoint):
 
         if max_results is not None:
             self.request_params["rows"] = max_results
-        return ArticleCollection(self).to_df()
+        return ArticleCollection(self._articles(list(self))).to_df()
+
+    def _articles(self, records: list[dict[str, Any]]) -> list[CrossrefArticle]:
+        """
+        Build articles from work records, naming funders from the Funder Registry.
+
+        Parameters
+        ----------
+        records : list[dict[str, Any]]
+            Crossref work records.
+
+        Returns
+        -------
+        list[CrossrefArticle]
+            One article per record.
+        """
+
+        registry = self._fetch_funder_registry(records)
+        return [CrossrefArticle(record, funder_registry=registry) for record in records]
+
+    def _fetch_funder_registry(
+        self, records: list[dict[str, Any]]
+    ) -> dict[str, FunderRegistryEntry]:
+        """
+        Get the Funder Registry entry of every funder the records give a DOI for.
+
+        Entries not cached yet are fetched from `/funders/{id}` in one batch. A
+        failed lookup is not cached, so the next query retries it.
+
+        Parameters
+        ----------
+        records : list[dict[str, Any]]
+            Crossref work records.
+
+        Returns
+        -------
+        dict[str, FunderRegistryEntry]
+            Entries by funder id, for the funders whose lookup succeeded.
+        """
+
+        funder_ids = {
+            funder_id
+            for record in records
+            for funder in record.get("funder", [])
+            if (funder_id := funder_registry_id(funder.get("DOI")))
+        }
+        missing = {
+            build_cr_endpoint(resource=CrossrefResource.FUNDERS, endpoint=funder_id): (
+                funder_id
+            )
+            for funder_id in sorted(funder_ids - self._funder_registry.keys())
+        }
+        if missing:
+            results = self.async_get(list(missing), print_progress=self.print_status)
+            for url, funder_id in missing.items():
+                message = (results.get(url) or {}).get("message") or {}
+                if not message.get("name"):
+                    logger.warning(
+                        f"Funder Registry lookup failed for {funder_id}; "
+                        "keeping the deposited name."
+                    )
+                    continue
+                self._funder_registry[funder_id] = FunderRegistryEntry(
+                    name=message["name"], alt_names=list(message.get("alt-names", []))
+                )
+        return {
+            funder_id: self._funder_registry[funder_id]
+            for funder_id in funder_ids
+            if funder_id in self._funder_registry
+        }
 
     def query(self, **kwargs) -> Self:
         """
@@ -343,12 +425,13 @@ class Crossref(Endpoint):
             url=build_cr_endpoint(resource=self.RESOURCE, endpoint=doi),
             print_progress=self.print_status,
         )
-        if result is None:
+        # `get` returns an empty dict, not None, when the request fails.
+        if "message" not in result:
             self.status_line("Found nothing.")
             return DataFrame(columns=CrossrefArticle.get_all_slots())
 
         self.status_line(f"Fethed {doi}")
-        return CrossrefArticle(result["message"]).to_df()
+        return self._articles([result["message"]])[0].to_df()
 
     def get_dois(self, dois: list[str]) -> DataFrame:
         """
@@ -359,11 +442,9 @@ class Crossref(Endpoint):
         urls = [build_cr_endpoint(resource=self.RESOURCE, endpoint=doi) for doi in dois]
         results = self.async_get(urls, print_progress=self.print_status)
         return ArticleCollection(
-            [
-                CrossrefArticle(result["message"])
-                for result in results.values()
-                if result is not None
-            ]
+            self._articles(
+                [result["message"] for result in results.values() if result is not None]
+            )
         ).to_df()
 
     def get_refs(

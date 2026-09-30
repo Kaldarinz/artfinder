@@ -10,10 +10,13 @@ import logging
 import re
 from ast import literal_eval
 
-from typing import Any, Dict, List, Iterable
+from typing import Any, Dict, List, Iterable, Mapping
 
 import pandas as pd
 from pandas import DataFrame
+
+from artfinder.crossref_helpers import funder_registry_id
+from artfinder.dataclasses import FunderRegistryEntry
 
 logger = logging.getLogger(__name__)
 
@@ -125,15 +128,31 @@ class Article:
 class CrossrefArticle(Article):
     """Data class that contains a Crossref article."""
 
-    def __init__(self, data: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        data: dict[str, Any],
+        funder_registry: Mapping[str, FunderRegistryEntry] | None = None,
+    ) -> None:
         """
         Initialize the object from a dictionary, returned by the Crossref API query.
+
+        Parameters
+        ----------
+        data : dict[str, Any]
+            Crossref work record.
+        funder_registry : Mapping[str, FunderRegistryEntry] | None, optional
+            Funder Registry entries by funder id. A funder found here is named
+            as the registry names it rather than as the publisher deposited it.
         """
 
         super().__init__()
-        self._extract_data(data)
+        self._extract_data(data, funder_registry or {})
 
-    def _extract_data(self, data: dict[str, Any]) -> None:
+    def _extract_data(
+        self,
+        data: dict[str, Any],
+        funder_registry: Mapping[str, FunderRegistryEntry],
+    ) -> None:
         """Extract the data from the dictionary."""
 
         # some values can be directly assigned
@@ -154,7 +173,7 @@ class CrossrefArticle(Article):
         self.publication_date = self._extrac_date(data)
         self.abstract = self._extract_abstract(data)
         self.doi = data.get("DOI", None)
-        self.funders = self._extract_funder(data)
+        self.funders = self._extract_funder(data, funder_registry)
         self.links = self._extract_link(data)
         self.keywords = self._extract_keywords(data)
 
@@ -178,14 +197,43 @@ class CrossrefArticle(Article):
                 link_list.append(link_new)
         return link_list
 
-    def _extract_funder(self, data: dict[str, Any]) -> List[dict[str, str | None]]:
-        """Extract the funder info from the data."""
+    def _extract_funder(
+        self,
+        data: dict[str, Any],
+        funder_registry: Mapping[str, FunderRegistryEntry],
+    ) -> list[dict[str, str | list[str]]]:
+        """
+        Extract the funders from the data.
+
+        A publisher can deposit a funder's name with every non-ASCII character
+        replaced by `?`. A funder whose DOI has an entry in `funder_registry`
+        therefore takes its name, and its alternative names, from that entry;
+        any other keeps the name as deposited.
+
+        Parameters
+        ----------
+        data : dict[str, Any]
+            Crossref work record.
+        funder_registry : Mapping[str, FunderRegistryEntry]
+            Funder Registry entries by funder id.
+
+        Returns
+        -------
+        list[dict[str, str | list[str]]]
+            One record per funder, with whichever of `name`, `alt_names`,
+            `doi` and `number` it has.
+        """
 
         funder_list_raw = data.get("funder", [])
         funder_list = []
         for funder in funder_list_raw:
-            funder_new = {}
-            if funder.get("name"):
+            funder_new: dict[str, str | list[str]] = {}
+            entry = funder_registry.get(funder_registry_id(funder.get("DOI")) or "")
+            if entry is not None:
+                funder_new["name"] = entry.name
+                if entry.alt_names:
+                    funder_new["alt_names"] = list(entry.alt_names)
+            elif funder.get("name"):
                 funder_new["name"] = funder.get("name")
             if funder.get("DOI"):
                 funder_new["doi"] = funder.get("DOI")
