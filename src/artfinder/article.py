@@ -414,7 +414,9 @@ class CrossrefArticle(Article):
         raw_abstract = data.get("abstract")
         if raw_abstract is not None:
             # Remove <jats:title> tags and other XML tags
-            raw_abstract = re.sub(r"<jats:title>.*</jats:title>", "", raw_abstract)
+            raw_abstract = re.sub(
+                r"<jats:title>.*?</jats:title>", "", raw_abstract, flags=re.DOTALL
+            )
             raw_abstract = re.sub(r"<[^>]+>", "", raw_abstract).strip()
             # Remove tabs and new lines
             raw_abstract = raw_abstract.replace("\t", "").replace("\n", "")
