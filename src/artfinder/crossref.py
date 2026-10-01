@@ -241,7 +241,7 @@ class Endpoint(ABC):
     def init_params(self) -> set[str]:
         """Get list of parameters for initialization."""
 
-        return set(("email", "request_params", "context", "endpoint"))
+        return set(("email", "request_params", "context", "endpoint", "print_status"))
 
     def from_self(self, **kwargs) -> Self:
         """
