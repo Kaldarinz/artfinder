@@ -4071,8 +4071,8 @@ class ArticlePDF:
         Left out are what only looks like part of a figure: the page furniture
         in the header and footer bands, a table's ruling, a rule of the page
         (a hairline most of the page wide), decoration bleeding off the page
-        edge, a frame drawn around text or a border beside a caption, anything
-        invisible (see `_is_visible_drawing`) and a background lying mostly
+        edge, a frame drawn around text, the edges of a box fitted around a
+        caption or a border beside a caption, anything invisible (see `_is_visible_drawing`) and a background lying mostly
         under a caption.
         An image whose blank margin runs under its caption is cut short at the
         caption instead.
@@ -4103,6 +4103,23 @@ class ArticlePDF:
             if self._is_visible_drawing(drawing)
         ]
         candidates += [(rect, 0.0) for rect in self.get_image_rects(page_no)]
+        # A box drawn around a caption, too close to it on every side to hold a
+        # figure. Its edges can be drawn as separate shapes as thick as a
+        # hairline, and one lying just under the caption is nearer to it than
+        # the figure is.
+        caption_frames = [
+            rect
+            for rect, _ in candidates
+            for caption in caption_rects
+            if rect.contains(caption)
+            and max(
+                caption.x0 - rect.x0,
+                caption.y0 - rect.y0,
+                rect.x1 - caption.x1,
+                rect.y1 - caption.y1,
+            )
+            < self.MIN_FIGURE_SIDE
+        ]
 
         result: list[Rect] = []
         for rect, stroke_width in candidates:
@@ -4131,6 +4148,8 @@ class ArticlePDF:
             ):
                 continue
             if any(rect.contains(text) for text in chain(caption_rects, paragraph_rects)):
+                continue
+            if any(self._fraction_inside(rect, frame) > 0.5 for frame in caption_frames):
                 continue
             if min(rect.width, rect.height) < self.MAX_HAIRLINE_WIDTH and any(
                 self._is_beside(rect, caption)
