@@ -3108,12 +3108,22 @@ class ArticlePDF:
         if not most_common_flags:
             return captions
         most_common_flag = most_common_flags[0][0]
+        # A caption set in another font is still kept when it is the only
+        # opening anywhere with its label: an author can type `Figure 1.` in
+        # bold and `Fig. 2` in the body font. A paragraph starting with
+        # `Fig. N` refers to a figure whose own caption carries the same label.
+        label_counts = Counter(
+            caption.label
+            for page_captions in captions.values()
+            for caption in page_captions
+        )
         result = {
             page_no: tuple(
                 [
                     caption
                     for caption in page_captions
                     if caption.font_props == most_common_flag
+                    or label_counts[caption.label] == 1
                 ]
             )
             for page_no, page_captions in captions.items()

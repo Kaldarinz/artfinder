@@ -354,13 +354,12 @@ class TestParagraphWidth:
 class TestSupplementaryFixtures:
     """Tests for the supplementary information documents of the golden set."""
 
-    def test_combined_document_keeps_the_main_figures(self) -> None:
+    def test_combined_document_keeps_both_figure_sets(self) -> None:
         """Test an article with its supplementary information bound to it.
 
         The four main captions of this article are set in one font and its three
-        supplementary ones in another; the caption filter keeps whichever font is
-        the more common in the document, so the supplementary set is lost. This
-        records that limit rather than endorsing it.
+        supplementary ones in another. The supplementary set is kept although its
+        font is the less common one: no other opening carries its labels.
         """
 
         pdf = (
@@ -376,7 +375,7 @@ class TestSupplementaryFixtures:
                 if block.text.strip().lower().startswith("supplementary figure")
             ]
 
-        assert labels == {"1", "2", "3", "4"}
+        assert labels == {"1", "2", "3", "4", "S1", "S2", "S3"}
         assert len(supplementary_captions) == 3, "the fixture changed"
 
     def test_supplementary_file_without_body_text(self) -> None:
