@@ -6,5 +6,6 @@ from .api import ArtFinder
 from .crossref import Crossref
 from .article import CrossrefArticle
 from .article_pdf import ArticlePDF
+from .doi import normalize_doi
 
-__all__ = ["CrossrefArticle", "Crossref", "ArtFinder", "ArticlePDF"]
+__all__ = ["CrossrefArticle", "Crossref", "ArtFinder", "ArticlePDF", "normalize_doi"]

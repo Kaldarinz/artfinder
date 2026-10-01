@@ -100,12 +100,16 @@ class Article:
         Returns
         -------
         list
-            A list of all __slots__ defined in the class and its superclasses.
+            A list of all __slots__ defined in the class and its superclasses,
+            each once.
         """
         slots = []
         for base in cls.__mro__:  # Traverse the Method Resolution Order (MRO)
-            if hasattr(base, "__slots__"):
-                slots.extend(base.__slots__)
+            # A subclass declaring no slots of its own inherits the attribute, so
+            # read each class's own declaration only.
+            for slot in base.__dict__.get("__slots__", ()):
+                if slot not in slots:
+                    slots.append(slot)
         return slots
 
     @classmethod

@@ -10,8 +10,10 @@ keeps main-text and supplementary figures apart in a document that contains
 both, such as a preprint with its supplementary information appended.
 """
 
+import html
 import logging
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from copy import copy, deepcopy
@@ -53,6 +55,7 @@ from artfinder.dataclasses import (
     TextBlockPDF,
     TextLinePDF,
 )
+from artfinder.doi import DOI_PATTERN, normalize_doi, strip_doi_decorations
 from artfinder.helpers import (
     clip_to_grid,
 )
@@ -161,8 +164,6 @@ class ArticlePDF:
     WHITE_LEVEL = 0.97
     """Lowest value every component of a colour must reach for it to be taken
     as white, which leaves a drawing painted in it invisible on the page."""
-    DOI_PATTERN = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
-    "Pattern of a DOI in text. The prefix dot is literal: `1000/x` is not a DOI."
     CAPTION_PATTERN = re.compile(
         r"^\s*(?:(?P<supp>supplementary|supplemental|supporting)\s+)?"
         r"Fig(?:\.|ure\.?|)\s+(?:(?P<prefix>S)\s?)?(?P<number>\d+)(?P<suffix>S)?(?!\w)[^\w(\[]*",
@@ -229,6 +230,50 @@ class ArticlePDF:
         re.IGNORECASE,
     )
     "Pattern of a DOI inside the XMP metadata packet."
+    XMP_NAMESPACES = {
+        "dc": "http://purl.org/dc/elements/1.1/",
+        "prism": "http://prismstandard.org/namespaces/basic/2.0/",
+    }
+    "Namespaces of the XMP properties `set_doi` writes the DOI to, by prefix."
+    XMP_PACKET = (
+        '<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'
+        '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n'
+        "</rdf:RDF>\n"
+        "</x:xmpmeta>\n"
+        '<?xpacket end="w"?>'
+    )
+    "Empty XMP packet, for a PDF that has none to merge the DOI into."
+    TITLE_JUNK_PATTERN = re.compile(
+        r"^(?:untitled|unknown|unbekannt|sans titre|no title|title|none|null"
+        r"|doi\b.*|microsoft \w+ - .*"
+        r"|.*\.(?:pdf|docx?|rtf|odt|tex|dvi|e?ps|fm|indd|qx[dp]|txt|xml|html?|wpd))$",
+        re.IGNORECASE,
+    )
+    """Pattern of a `title` metadata value that is not a title: a placeholder,
+    a DOI, or the name of the file the PDF was made from (`Microsoft Word -
+    paper.docx`, `BullLeb2322015Skribitskaya.fm`)."""
+    SUPPLEMENT_HEADING_PATTERN = re.compile(
+        r"^\s*(?:electronic\s+)?(?:supplementary|supplemental|supporting)"
+        r"(?:\s+online)?\s+(?:information|materials?|data|text)\b"
+        r"(?:\s*\(\w+\))?(?:\s+for\b)?[\s:.]*",
+        re.IGNORECASE,
+    )
+    """Pattern of the heading a supplementary document sets before, or in place
+    of, the title of its article: `Supporting Information`, `Supplementary
+    Materials:`, `Supporting Online Material for`."""
+    TITLE_MIN_WORDS = 4
+    """Fewest words a title may have. Shorter text set large at the top of a
+    page is a journal banner (`Applied Surface Science`), a badge or a heading."""
+    TITLE_MAX_PAGE_FRACTION = 0.5
+    "How far down the first page, as a fraction of its height, a title may start."
+    TITLE_MAX_LINE_GAP = 1.3
+    """Widest blank space between the first two lines of a title, as a multiple
+    of its font size. The lines after them keep the pitch of the first two."""
+    TITLE_SIZE_RATIO = 0.9
+    """Smallest font size, as a fraction of the largest title-like text on the
+    page, still competing to be the title. A journal banner can be set a little
+    larger than the title under it; of the competitors the longest wins."""
     REFERENCES_HEADING_PATTERN = re.compile(
         r"^[ \t]*(?:\d+\.?[ \t]*)?"
         r"(?:references and notes|references|bibliography|literature cited)"
@@ -375,6 +420,24 @@ class ArticlePDF:
         """
 
         return self._get_doi()
+
+    @cached_property
+    def title(self) -> str | None:
+        """
+        Title of the article.
+
+        Taken from the `title` metadata when that is a title printed on the first
+        page; publishers often leave a file name or a template's placeholder
+        there instead. Otherwise read from the first page: the largest text near
+        its top, wrapped lines joined.
+
+        Returns
+        -------
+        str | None
+            Title if found, otherwise None.
+        """
+
+        return self._get_title()
 
     @cached_property
     def paragraph_width(self) -> Size:
@@ -1399,34 +1462,23 @@ class ArticlePDF:
             DOI string if the packet exists and holds one, otherwise None.
         """
 
-        try:
-            xmp = self.file.get_xml_metadata()
-        except Exception:  # noqa: BLE001 - pymupdf raises varied types without a packet
-            return None
-        if not xmp:
-            return None
-        match = self.XMP_DOI_PATTERN.search(xmp)
-        return self._normalize_doi_candidate(match.group(1)) if match else None
+        match = self.XMP_DOI_PATTERN.search(self._xmp_packet())
+        return strip_doi_decorations(match.group(1)) if match else None
 
-    @classmethod
-    def _normalize_doi_candidate(cls, candidate: str) -> str:
+    def _xmp_packet(self) -> str:
         """
-        Strip the decorations publishers append to a DOI in running text.
-
-        Parameters
-        ----------
-        candidate : str
-            Raw DOI match.
+        Internal method to get the XMP metadata packet of the PDF.
 
         Returns
         -------
         str
-            Lowercased DOI without a supplemental-material suffix or trailing
-            sentence punctuation.
+            The packet, or an empty string if the PDF has none.
         """
 
-        # ".../-/DCSupplemental" and friends address the supplement, not the article.
-        return re.split(r"/-/", candidate.lower())[0].rstrip(".,;:)")
+        try:
+            return self.file.get_xml_metadata() or ""
+        except Exception:  # noqa: BLE001 - pymupdf raises varied types without a packet
+            return ""
 
     @classmethod
     def extract_doi_candidates(cls, text: str) -> list[str]:
@@ -1455,8 +1507,8 @@ class ArticlePDF:
         text = re.sub(r"([./-])[ \t]*\n[ \t]*(?=[-._;()/:A-Za-z0-9])", r"\1", text)
 
         candidates: list[str] = []
-        for match in cls.DOI_PATTERN.finditer(text):
-            candidate = cls._normalize_doi_candidate(match.group())
+        for match in DOI_PATTERN.finditer(text):
+            candidate = strip_doi_decorations(match.group())
             if candidate not in candidates:
                 candidates.append(candidate)
         return [
@@ -1486,6 +1538,376 @@ class ArticlePDF:
 
         candidates = cls.extract_doi_candidates(text)
         return candidates[0] if candidates else None
+
+    def set_doi(self, doi: str, dst: PathLike | str | None = None) -> None:
+        """
+        Write a DOI into the PDF metadata, where `doi` reads it from.
+
+        The DOI goes into the `subject` key and into the XMP packet, as
+        `prism:doi` and as `dc:identifier` (`doi:<doi>`). A DOI the PDF already
+        carries in either is replaced; the rest of the subject and of the packet
+        is kept. Page content is not touched.
+
+        Parameters
+        ----------
+        doi : str
+            DOI in any form `normalize_doi` accepts.
+        dst : PathLike | str | None, optional
+            File to save the result to. If None, the PDF is saved in place,
+            incrementally when its structure allows it.
+
+        Raises
+        ------
+        ValueError
+            If `doi` is not a DOI, or if `dst` is None for a PDF opened from bytes.
+        """
+
+        normalized = normalize_doi(doi)
+        if normalized is None:
+            raise ValueError(f"Not a DOI: {doi!r}.")
+        in_place = dst is None or (
+            hasattr(self, "path") and Path(dst).resolve() == self.path.resolve()
+        )
+        if in_place and not hasattr(self, "path"):
+            raise ValueError(f"{self} was opened from bytes: pass dst to save it.")
+
+        metadata = cast(dict[str, str], self.file.metadata or {})
+        subject = metadata.get("subject") or ""
+        self.file.set_metadata({"subject": self._subject_with_doi(subject, normalized)})
+        xmp = self._xmp_packet()
+        old_doi = self._extract_doi_from_xmp()
+        self.file.set_xml_metadata(self._xmp_with_doi(xmp, old_doi, normalized))
+
+        if not in_place:
+            self.file.save(str(dst))
+        elif self.file.can_save_incrementally():
+            self.file.saveIncr()
+        else:
+            # A repaired document cannot be appended to, nor rewritten over the
+            # file it is read from.
+            data = self.file.tobytes()
+            self.file.close()
+            temp = self.path.with_name(f"{self.path.name}.tmp")
+            temp.write_bytes(data)
+            temp.replace(self.path)
+            self.file = pymupdf.open(str(self.path))
+        self.__dict__.pop("doi", None)
+
+    @classmethod
+    def _subject_with_doi(cls, subject: str, doi: str) -> str:
+        """
+        Internal method to put a DOI into the `subject` metadata.
+
+        Parameters
+        ----------
+        subject : str
+            Current subject, possibly empty.
+        doi : str
+            Normalized DOI.
+
+        Returns
+        -------
+        str
+            The subject with every DOI in it replaced by `doi`, or with `doi`
+            appended if it had none.
+        """
+
+        old_dois = cls.extract_doi_candidates(subject)
+        if not old_dois:
+            return f"{subject.strip()}; doi:{doi}" if subject.strip() else f"doi:{doi}"
+        for old_doi in old_dois:
+            subject = cls._replace_doi(subject, old_doi, doi)
+        # A replacement can leave the DOI unreadable, e.g. run on into a suffix.
+        if cls.extract_doi_from_text(subject) != doi:
+            return f"doi:{doi}"
+        return subject
+
+    @staticmethod
+    def _replace_doi(text: str, old_doi: str, doi: str) -> str:
+        """
+        Internal method to replace every occurrence of a DOI, in any case.
+
+        Parameters
+        ----------
+        text : str
+            Text to edit.
+        old_doi : str
+            DOI to replace.
+        doi : str
+            DOI to put in its place.
+
+        Returns
+        -------
+        str
+            Text with `old_doi` replaced.
+        """
+
+        return re.sub(re.escape(old_doi), lambda _: doi, text, flags=re.IGNORECASE)
+
+    @classmethod
+    def _xmp_with_doi(cls, xmp: str, old_doi: str | None, doi: str) -> str:
+        """
+        Internal method to merge a DOI into an XMP packet.
+
+        The DOI the packet held is replaced everywhere it occurs (`rdf:about`,
+        `prism:url` and the like). `prism:doi` and `dc:identifier` are set
+        whether written as elements or as attributes; whichever of the two the
+        packet lacks is added in an `rdf:Description` of its own.
+
+        Parameters
+        ----------
+        xmp : str
+            Current packet, or an empty string for a PDF with none.
+        old_doi : str | None
+            DOI the packet held, as `_extract_doi_from_xmp` read it.
+        doi : str
+            Normalized DOI.
+
+        Returns
+        -------
+        str
+            The packet carrying `doi`.
+        """
+
+        if "</rdf:RDF>" not in xmp:
+            xmp = cls.XMP_PACKET
+        elif old_doi is not None:
+            xmp = cls._replace_doi(xmp, old_doi, doi)
+
+        values = {"prism:doi": doi, "dc:identifier": f"doi:{doi}"}
+        missing: dict[str, str] = {}
+        for name, value in values.items():
+            element = re.compile(rf"(<{name}\b[^>]*>)[^<]*(</{name}>)", re.IGNORECASE)
+            attribute = re.compile(rf"(\s{name}\s*=\s*)([\"'])[^\"']*\2", re.IGNORECASE)
+            xmp, elements = element.subn(lambda m: f"{m[1]}{value}{m[2]}", xmp)
+            xmp, attributes = attribute.subn(
+                lambda m: f"{m[1]}{m[2]}{value}{m[2]}", xmp
+            )
+            if elements + attributes == 0:
+                missing[name] = value
+        if not missing:
+            return xmp
+
+        # Every description of a packet must be about the same resource.
+        about = re.search(r"rdf:about\s*=\s*\"([^\"]*)\"", xmp)
+        namespaces = "".join(
+            f' xmlns:{prefix}="{uri}"'
+            for prefix, uri in cls.XMP_NAMESPACES.items()
+            if any(name.startswith(f"{prefix}:") for name in missing)
+        )
+        properties = "".join(
+            f"\n   <{name}>{value}</{name}>" for name, value in missing.items()
+        )
+        description = (
+            f' <rdf:Description rdf:about="{about[1] if about else ""}"{namespaces}>'
+            f"{properties}\n </rdf:Description>\n"
+        )
+        rdf_end = xmp.rindex("</rdf:RDF>")
+        return xmp[:rdf_end] + description + xmp[rdf_end:]
+
+    def _get_title(self) -> str | None:
+        """
+        Get the title of the article from the PDF metadata or its first page.
+
+        Returns
+        -------
+        str | None
+            Title if found, otherwise None.
+        """
+
+        metadata = cast(dict[str, str], self.file.metadata or {})
+        title = self._clean_metadata_title(metadata.get("title") or "")
+        if title is not None and self._is_on_first_page(title):
+            return title
+        return self._title_from_first_page()
+
+    @classmethod
+    def _clean_metadata_title(cls, title: str) -> str | None:
+        """
+        Internal method to tidy a `title` metadata value, rejecting non-titles.
+
+        Parameters
+        ----------
+        title : str
+            Raw metadata value.
+
+        Returns
+        -------
+        str | None
+            The title with entities decoded, whitespace collapsed and any
+            supplementary-material heading dropped, or None if what is left is
+            empty, too short or matches `TITLE_JUNK_PATTERN`.
+        """
+
+        title = cls._normalize_caption_whitespace(html.unescape(title))
+        if cls.TITLE_JUNK_PATTERN.match(title):
+            return None
+        title = cls.SUPPLEMENT_HEADING_PATTERN.sub("", title, count=1)
+        return title if cls._is_title_like(title) else None
+
+    @classmethod
+    def _is_title_like(cls, text: str) -> bool:
+        """
+        Internal method to tell whether text is long enough to be a title.
+
+        Parameters
+        ----------
+        text : str
+            Text to check.
+
+        Returns
+        -------
+        bool
+            Whether at least `TITLE_MIN_WORDS` of its words contain a letter.
+        """
+
+        words = [word for word in text.split() if any(ch.isalpha() for ch in word)]
+        return len(words) >= cls.TITLE_MIN_WORDS
+
+    def _is_on_first_page(self, text: str) -> bool:
+        """
+        Internal method to tell whether text is printed on the first page.
+
+        Only letters and digits are compared, case-folded, so hyphenation, line
+        breaks and ligatures do not matter.
+
+        Parameters
+        ----------
+        text : str
+            Text to look for.
+
+        Returns
+        -------
+        bool
+            Whether the first page contains `text`. True for a first page with no
+            text layer (a scan), which cannot tell.
+        """
+
+        def letters(value: str) -> str:
+            folded = unicodedata.normalize("NFKC", value).casefold()
+            return "".join(ch for ch in folded if ch.isalnum())
+
+        if self.file.page_count == 0:
+            return True
+        page_text = self._page(0).get_text()
+        page_letters = letters(page_text) if isinstance(page_text, str) else ""
+        return not page_letters or letters(text) in page_letters
+
+    def _title_from_first_page(self) -> str | None:
+        """
+        Internal method to read the title off the first page.
+
+        The title is the most prominent text in the top `TITLE_MAX_PAGE_FRACTION`
+        of the page: set larger than the body, outside the header and running
+        matter, at least `TITLE_MIN_WORDS` long once a supplementary-material
+        heading is dropped. Of the candidates within `TITLE_SIZE_RATIO` of the
+        largest, the longest wins, which passes over a journal banner set a
+        little larger than the title.
+
+        Returns
+        -------
+        str | None
+            Title if found, otherwise None.
+        """
+
+        if self.file.page_count == 0:
+            return None
+        page_rect = cast(Rect, self._page(0).rect)
+        max_y = page_rect.y0 + page_rect.height * self.TITLE_MAX_PAGE_FRACTION
+        body_size = self.body_font[1]
+        header = self.header_rect
+
+        lines_by_font: dict[tuple[str, float], list[TextLinePDF]] = {}
+        for block in self._text_cache[0]:
+            if self._is_running_matter(block.rect) or (
+                not header.is_empty and block.rect.y1 <= header.y1
+            ):
+                continue
+            for line in block.lines:
+                font = self._block_font(TextBlockPDF(rect=line.rect, lines=[line]))
+                if (
+                    font is None
+                    or line.rotation != 0
+                    or line.rect.y0 > max_y
+                    or font[1] <= body_size + self.FONT_SIZE_TOLERANCE
+                ):
+                    continue
+                lines_by_font.setdefault(font, []).append(line)
+
+        candidates: list[tuple[float, str]] = []
+        for (_, size), lines in lines_by_font.items():
+            for group in self._title_line_groups(lines, size):
+                text = self.SUPPLEMENT_HEADING_PATTERN.sub(
+                    "", self._join_caption_lines(group, keep_hyphens=True), count=1
+                )
+                if self._is_title_like(text):
+                    candidates.append((size, text))
+        if not candidates:
+            return None
+        largest = max(size for size, _ in candidates)
+        return max(
+            (
+                text
+                for size, text in candidates
+                if size >= largest * self.TITLE_SIZE_RATIO
+            ),
+            key=len,
+        )
+
+    def _title_line_groups(
+        self, lines: list[TextLinePDF], size: float
+    ) -> list[list[TextLinePDF]]:
+        """
+        Internal method to group lines of one font into runs that read as one text.
+
+        A line joins the run above it if it overlaps the run horizontally and
+        either sits on the same baseline as its last line or follows it: the
+        second line at most `TITLE_MAX_LINE_GAP` font sizes below, every later
+        one at the pitch of the first two. That keeps an author list set in the
+        title's font a little further down out of the title.
+
+        Parameters
+        ----------
+        lines : list[TextLinePDF]
+            Lines set in one font.
+        size : float
+            Size of that font.
+
+        Returns
+        -------
+        list[list[TextLinePDF]]
+            Runs of lines, each in reading order.
+        """
+
+        groups: list[list[TextLinePDF]] = []
+        pitch: float | None = None
+        reading_order = sorted(
+            lines, key=lambda line: (round(self._baseline(line)), line.rect.x0)
+        )
+        for line in reading_order:
+            if groups:
+                group = groups[-1]
+                last = group[-1]
+                delta = self._baseline(line) - self._baseline(last)
+                overlaps = any(
+                    line.rect.x0 < other.rect.x1 and other.rect.x0 < line.rect.x1
+                    for other in group
+                )
+                if abs(delta) <= size / 2:
+                    group.append(line)
+                    continue
+                if pitch is None:
+                    gap = line.rect.y0 - last.rect.y1
+                    follows = gap <= size * self.TITLE_MAX_LINE_GAP
+                else:
+                    follows = abs(delta - pitch) <= pitch * self.LINE_PITCH_TOLERANCE
+                if overlaps and follows:
+                    pitch = pitch if pitch is not None else delta
+                    group.append(line)
+                    continue
+            groups.append([line])
+            pitch = None
+        return groups
 
     def _figure_dpi(self, figure_label: str) -> int:
         """
@@ -2856,7 +3278,9 @@ class ArticlePDF:
                             pairs.add((parts[i].lower(), parts[i + 1].lower()))
         return frozenset(pairs)
 
-    def _join_caption_lines(self, lines: Iterable[TextLinePDF]) -> str:
+    def _join_caption_lines(
+        self, lines: Iterable[TextLinePDF], keep_hyphens: bool = False
+    ) -> str:
         """
         Join a figure caption's lines into clean text.
 
@@ -2873,6 +3297,9 @@ class ArticlePDF:
         ----------
         lines : Iterable[TextLinePDF]
             Lines to join, in reading order.
+        keep_hyphens : bool, optional
+            Keep every plain "-" at a line end, for text that is not hyphenated
+            to wrap, such as a title set ragged.
 
         Returns
         -------
@@ -2901,7 +3328,7 @@ class ArticlePDF:
             elif result.endswith("-"):
                 w1_match = word_end_pattern.search(result[:-1])
                 w2_match = word_start_pattern.match(text)
-                keep_hyphen = (
+                keep_hyphen = keep_hyphens or (
                     w1_match is not None
                     and w2_match is not None
                     and (w1_match.group(0).lower(), w2_match.group(0).lower())
