@@ -383,5 +383,12 @@
     "tungsten disulfide nanoparticles produced by femtosecond laser ablation in water for nanophotonic applications.pdf": {
         "1": "(a) SEM image of laser-ablated WS 2 NPs selected from a colloidal solution at 250 rpm. Inset shows the corresponding size distribution of WS 2 NPs. (b) TEM image of WS 2 NPs selected at 8000 rpm. Insets show HR-TEM image of selected area and size distribution. (c) Extinction spectra of WS 2 NPs selected at different rotation speed. (d) Raman scattering spectra of WS 2 NPs selected at different rotation speed.",
         "2": "Raman spectra of WS 2 NPs with an average size of 65nm on glass substrate recorded under different laser excitation power and at two laser wavelengths: (a) 532 nm and b 633 nm correspondingly. (b) Shift of the frequencies corresponding to A 1g and E 1 2g Raman scattering modes. (d) Dependence of WS 2 NPs local temperature on the power of exciting radiation for \u03bbexc = 532 nm and \u03bbexc = 633 nm."
+    },
+    "silicon-gold nanoparticles affect wharton's jelly phenotype and secretome during tri-lineage differentiation_si.pdf": {
+        "S1": "Time-dependent expression of MSCs surface markers during adipogenic (Adipo), Osteogenic (Osteo), and chondrogenic (Chondro) differentiation estimated by flow cytometry. MFI designate mean fluorescence intensity. Data are presented for CD90 (a) and CD73 (b) expression. Results are pooled from 2 experiments.",
+        "S2": "Concentration of humoral factors stably produced by MSCs. Results are pooled from 2 experiments.",
+        "S3": "Time-dependent humoral factor production by unstimulated MSCs.",
+        "S4": "Total concentration of humoral factors during MSCs differentiation without NPs (a) and in the presence of NPs during condrogenic (b), osteogenic (c), and adipogenic (d) differentiation. Significant differences are shown with asterisks.",
+        "S5": "Effect of SiNPs on soluble factor production by MSCs at 14 th day of chondrogenic (a) and osteogenic (b) differentiation. Common effects of differentiating stimuli and SiNPs are shown by brackets."
     }
 }

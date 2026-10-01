@@ -186,6 +186,9 @@ class ArticlePDF:
     MIN_TABLE_RULING_OVERLAP = 0.5
     """Fraction of a drawing that must lie inside a table body for the drawing to
     be part of the table — its ruling or the shading of its header."""
+    MIN_CELL_GAP = 2.0
+    """Narrowest gap, in line heights, between two lines on one baseline for
+    them to be table cells rather than pieces of one line of a caption."""
     MAX_TABLE_CELL_CHARS = 30
     """Longest median line, in characters, for a block to read as table cells
     rather than as running text."""
@@ -562,6 +565,11 @@ class ArticlePDF:
         them all. That keeps out an element that merely dips into the band —
         a caption at the foot of a page, or a sidebar running the height of it.
 
+        An image must also repeat its picture, not only its place: a figure-only
+        supplement can set a figure of the same size at the top of every page,
+        and with no body text on those pages nothing else keeps it out. A logo
+        is the same picture on every page; figures differ.
+
         Note this reads `paragraph_width`, which is why `_calc_paragraph_width`
         selects on prose rather than on the tables, headers and footers found so
         far: it would otherwise be circular.
@@ -582,7 +590,7 @@ class ArticlePDF:
 
         clip_precision = self.RECTS_CLIP_PRECISION
         while True:
-            pages_of_rect: dict[Rect, set[int]] = {}
+            pages_of_rect: dict[tuple[Rect, bytes | None], set[int]] = {}
             for page_no in range(self.file.page_count):
                 paragraphs = self.get_paragraph_rects(
                     page_no=page_no, copy_rects=False
@@ -590,12 +598,25 @@ class ArticlePDF:
                 body_top = min((rect.y0 for rect in paragraphs), default=None)
                 body_bottom = max((rect.y1 for rect in paragraphs), default=None)
 
-                rects = chain(
-                    self.get_text_rects(page_no=page_no, copy_rects=False),
-                    self.get_drawing_rects(page_no=page_no, copy_rects=False),
-                    self.get_image_rects(page_no=page_no, copy_rects=False),
+                rects: Iterable[tuple[Rect, bytes | None]] = chain(
+                    (
+                        (rect, None)
+                        for rect in self.get_text_rects(
+                            page_no=page_no, copy_rects=False
+                        )
+                    ),
+                    (
+                        (rect, None)
+                        for rect in self.get_drawing_rects(
+                            page_no=page_no, copy_rects=False
+                        )
+                    ),
+                    (
+                        (image.rect, image.digest)
+                        for image in self._images_cache[page_no]
+                    ),
                 )
-                for rect in rects:
+                for rect, digest in rects:
                     if not Rect(rect).intersects(band):
                         continue
                     if is_header:
@@ -604,7 +625,7 @@ class ArticlePDF:
                     elif body_bottom is not None and rect.y0 < body_bottom:
                         continue
                     clipped = clip_to_grid(rect, clip_precision)
-                    pages_of_rect.setdefault(clipped, set()).add(page_no)
+                    pages_of_rect.setdefault((clipped, digest), set()).add(page_no)
 
             page_counts = {
                 len(pages)
@@ -619,7 +640,9 @@ class ArticlePDF:
 
         most_pages = max(page_counts)
         return [
-            rect for rect, pages in pages_of_rect.items() if len(pages) == most_pages
+            rect
+            for (rect, _), pages in pages_of_rect.items()
+            if len(pages) == most_pages
         ]
 
     @cached_property
@@ -2896,6 +2919,58 @@ class ArticlePDF:
 
         return self._find_captions(self.CAPTION_PATTERN)
 
+    @classmethod
+    def _cut_at_table_row(cls, block: TextBlockPDF) -> tuple[TextBlockPDF, bool]:
+        """
+        Internal method to end a caption block before a row of table cells.
+
+        A word processor can put a table caption and the header row and first
+        column of its table in one block. Below its opening line a caption never
+        has two lines side by side on one baseline more than `MIN_CELL_GAP` line
+        heights apart — the tail of a line split off at a superscript abuts it,
+        the words of a justified line split into lines of their own are a space
+        apart — so the first such row is where the caption ends. The opening
+        line is left alone: a label is often set apart from the caption text.
+        Left in, the cells pass for caption text and the table body, which must
+        start beneath its caption, is never found.
+
+        Parameters
+        ----------
+        block : TextBlockPDF
+            Block opening with a caption.
+
+        Returns
+        -------
+        tuple[TextBlockPDF, bool]
+            The block cut before the first row of cells, and whether it was cut.
+        """
+
+        def same_baseline(a: TextLinePDF, b: TextLinePDF) -> bool:
+            overlap = min(a.rect.y1, b.rect.y1) - max(a.rect.y0, b.rect.y0)
+            return overlap > 0.5 * min(a.rect.height, b.rect.height)
+
+        def in_cells(line: TextLinePDF) -> bool:
+            # Gaps are measured between neighbours: the first and last words
+            # of a justified line split word by word are far apart too.
+            row = sorted(
+                (other for other in lines[1:] if same_baseline(line, other)),
+                key=lambda other: other.rect.x0,
+            )
+            return any(
+                right.rect.x0 - left.rect.x1
+                > cls.MIN_CELL_GAP * min(left.rect.height, right.rect.height)
+                for left, right in zip(row, row[1:])
+            )
+
+        lines = block.lines
+        for k in range(1, len(lines)):
+            if in_cells(lines[k]):
+                rect = Rect()
+                for line in lines[:k]:
+                    rect.include_rect(line.rect)
+                return TextBlockPDF(rect=rect, lines=lines[:k]), True
+        return block, False
+
     def _find_captions(
         self, pattern: re.Pattern[str]
     ) -> dict[int, tuple[FigureCaptionPDF, ...]]:
@@ -2956,6 +3031,8 @@ class ArticlePDF:
                             break
                         block = block + text_blocks[i]
 
+                    block, cut = self._cut_at_table_row(block)
+
                     # Case 3: caption split in several blocks. Check if the first line
                     # of the next block is one line down from the last line of current block.
                     # Once two lines of the caption are known, their distance is
@@ -2972,7 +3049,7 @@ class ArticlePDF:
                     # tail of a line, raised above it by a superscript.
                     last_rect = block.lines[-1].rect
                     i += 1
-                    while i < num_blocks:
+                    while not cut and i < num_blocks:
                         next_block = text_blocks[i]
                         # Blocks can include inner empty lines, so we should add lines by one.
                         capture_extended = False
@@ -3290,9 +3367,27 @@ class ArticlePDF:
 
         result: list[TablePDF] = []
         for caption in captions:
+            page_blocks: list[TextBlockPDF] = []
+            for block in self._text_cache[page_no]:
+                # A word processor can put the caption and the first cells of
+                # its table in one block (see `_cut_at_table_row`); the cells
+                # left out of the caption are the start of the body.
+                if block.rect.intersects(caption.rect):
+                    rest = [
+                        line
+                        for line in block.lines
+                        if not line.rect.intersects(caption.rect)
+                    ]
+                    if not rest:
+                        continue
+                    rest_rect = Rect()
+                    for line in rest:
+                        rest_rect.include_rect(line.rect)
+                    block = TextBlockPDF(rect=rest_rect, lines=rest)
+                page_blocks.append(block)
             blocks = [
                 block
-                for block in self._text_cache[page_no]
+                for block in page_blocks
                 if not block.rect.intersects(caption.rect)
                 # A table is printed in the column of its caption.
                 and block.rect.x1 > caption.rect.x0
@@ -3337,6 +3432,23 @@ class ArticlePDF:
             table_rect = copy(body[0].rect)
             for block in body[1:]:
                 table_rect.include_rect(block.rect)
+            # The rules above and below the cells lie outside them: a rule
+            # across the table, on its side of the caption and no farther from
+            # the cells than they are from each other.
+            text_rect = copy(table_rect)
+            for rect in self.get_drawing_rects(page_no, copy_rects=False):
+                if (
+                    rect.height < self.MAX_HAIRLINE_WIDTH
+                    and min(rect.x1, text_rect.x1) - max(rect.x0, text_rect.x0)
+                    > 0.5 * rect.width
+                    and self._gap_between(rect, text_rect) <= max_gap
+                    and (
+                        rect.y0 >= caption.rect.y1
+                        if caption_above
+                        else rect.y1 <= caption.rect.y0
+                    )
+                ):
+                    table_rect = self._span(table_rect, rect)
             # The ruling and the shading of a table are drawn, not written, so
             # they lie outside the blocks the body was walked over.
             for rect in chain(

@@ -46,6 +46,13 @@ HEADER_AND_FOOTER_PDF = (
     / "laser-ablation synthesis of colloidal zrn nanoparticles in different liquids.pdf"
 )
 
+# A figure-only supplement whose last three pages each hold a different figure
+# of the same size at the top, with no body text to keep it out of the header.
+SAME_PLACE_FIGURES_PDF = (
+    TEST_PDFS_DIR
+    / "silicon-gold nanoparticles affect wharton's jelly phenotype and secretome during tri-lineage differentiation_si.pdf"
+)
+
 
 class TestHeaderThreshold:
     """Tests for the number of pages a header must appear on."""
@@ -186,3 +193,18 @@ class TestBandCandidates:
 
         with ArticlePDF(NO_FOOTER_CONTENT_PDF) as article:
             assert article.footer_rect.is_empty
+
+
+class TestRepeatedImages:
+    """Tests that an image is furniture only if its picture repeats."""
+
+    def test_figures_at_the_same_place_are_not_a_header(self) -> None:
+        """Test that different figures at the same place make no header."""
+
+        with ArticlePDF(SAME_PLACE_FIGURES_PDF) as article:
+            header = article.header_rect
+            figures = article.figures
+
+        assert header.is_empty, f"a header was found where there is none: {header}"
+        for label in ("S2", "S4", "S5"):
+            assert figures[label].rect.height > 300, f"figure {label} was clipped"
