@@ -10,10 +10,13 @@ import logging
 import re
 from ast import literal_eval
 
-from typing import Any, Dict, List, Iterable
+from typing import Any, Dict, List, Iterable, Mapping
 
 import pandas as pd
 from pandas import DataFrame
+
+from artfinder.crossref_helpers import funder_registry_id
+from artfinder.dataclasses import FunderRegistryEntry
 
 logger = logging.getLogger(__name__)
 
@@ -97,12 +100,16 @@ class Article:
         Returns
         -------
         list
-            A list of all __slots__ defined in the class and its superclasses.
+            A list of all __slots__ defined in the class and its superclasses,
+            each once.
         """
         slots = []
         for base in cls.__mro__:  # Traverse the Method Resolution Order (MRO)
-            if hasattr(base, "__slots__"):
-                slots.extend(base.__slots__)
+            # A subclass declaring no slots of its own inherits the attribute, so
+            # read each class's own declaration only.
+            for slot in base.__dict__.get("__slots__", ()):
+                if slot not in slots:
+                    slots.append(slot)
         return slots
 
     @classmethod
@@ -125,15 +132,31 @@ class Article:
 class CrossrefArticle(Article):
     """Data class that contains a Crossref article."""
 
-    def __init__(self, data: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        data: dict[str, Any],
+        funder_registry: Mapping[str, FunderRegistryEntry] | None = None,
+    ) -> None:
         """
         Initialize the object from a dictionary, returned by the Crossref API query.
+
+        Parameters
+        ----------
+        data : dict[str, Any]
+            Crossref work record.
+        funder_registry : Mapping[str, FunderRegistryEntry] | None, optional
+            Funder Registry entries by funder id. A funder found here is named
+            as the registry names it rather than as the publisher deposited it.
         """
 
         super().__init__()
-        self._extract_data(data)
+        self._extract_data(data, funder_registry or {})
 
-    def _extract_data(self, data: dict[str, Any]) -> None:
+    def _extract_data(
+        self,
+        data: dict[str, Any],
+        funder_registry: Mapping[str, FunderRegistryEntry],
+    ) -> None:
         """Extract the data from the dictionary."""
 
         # some values can be directly assigned
@@ -154,7 +177,7 @@ class CrossrefArticle(Article):
         self.publication_date = self._extrac_date(data)
         self.abstract = self._extract_abstract(data)
         self.doi = data.get("DOI", None)
-        self.funders = self._extract_funder(data)
+        self.funders = self._extract_funder(data, funder_registry)
         self.links = self._extract_link(data)
         self.keywords = self._extract_keywords(data)
 
@@ -178,12 +201,21 @@ class CrossrefArticle(Article):
                 link_list.append(link_new)
         return link_list
 
-    def _extract_funder(self, data: dict[str, Any]) -> List[dict[str, str | None]]:
+    def _extract_funder(
+        self,
+        data: dict[str, Any],
+        funder_registry: Mapping[str, FunderRegistryEntry],
+    ) -> list[dict[str, str | list[str]]]:
         """
         Extract the funders from the data, one record per award.
 
+        A publisher can deposit a funder's name with every non-ASCII character
+        replaced by `?`. A funder whose DOI has an entry in `funder_registry`
+        therefore takes its name, and its alternative names, from that entry;
+        any other keeps the name as deposited.
+
         A Crossref funder record may list several awards; each becomes a record
-        of its own carrying the funder's `name` and `doi` and one `number`, in
+        of its own carrying the funder's names and `doi` and one `number`, in
         the order Crossref lists them. A funder with no awards gives a single
         record without `number`. Award strings are kept exactly as deposited.
 
@@ -191,26 +223,34 @@ class CrossrefArticle(Article):
         ----------
         data : dict[str, Any]
             Crossref work record.
+        funder_registry : Mapping[str, FunderRegistryEntry]
+            Funder Registry entries by funder id.
 
         Returns
         -------
-        List[dict[str, str | None]]
-            Funder records with keys `name`, `doi` and `number`, each present
-            only when Crossref gives it.
+        list[dict[str, str | list[str]]]
+            One record per award, with whichever of `name`, `alt_names`, `doi`
+            and `number` it has.
         """
 
-        funder_list: List[dict[str, str | None]] = []
+        funder_list: list[dict[str, str | list[str]]] = []
         for funder in data.get("funder", []):
-            funder_base: dict[str, str | None] = {}
-            if funder.get("name"):
-                funder_base["name"] = funder["name"]
-            if funder.get("DOI"):
-                funder_base["doi"] = funder["DOI"]
-            awards = funder.get("award") or []
-            if not awards:
-                funder_list.append(funder_base)
+            entry = funder_registry.get(funder_registry_id(funder.get("DOI")) or "")
+            awards: list[str | None] = list(funder.get("award") or []) or [None]
             for award in awards:
-                funder_list.append({**funder_base, "number": award})
+                record: dict[str, str | list[str]] = {}
+                if entry is not None:
+                    record["name"] = entry.name
+                    if entry.alt_names:
+                        # A list of its own per record, not one shared by the awards.
+                        record["alt_names"] = list(entry.alt_names)
+                elif funder.get("name"):
+                    record["name"] = funder["name"]
+                if funder.get("DOI"):
+                    record["doi"] = funder["DOI"]
+                if award is not None:
+                    record["number"] = award
+                funder_list.append(record)
         return funder_list
 
     def _extract_journal(self, data: dict[str, Any]) -> str | None:
@@ -385,7 +425,9 @@ class CrossrefArticle(Article):
         raw_abstract = data.get("abstract")
         if raw_abstract is not None:
             # Remove <jats:title> tags and other XML tags
-            raw_abstract = re.sub(r"<jats:title>.*</jats:title>", "", raw_abstract)
+            raw_abstract = re.sub(
+                r"<jats:title>.*?</jats:title>", "", raw_abstract, flags=re.DOTALL
+            )
             raw_abstract = re.sub(r"<[^>]+>", "", raw_abstract).strip()
             # Remove tabs and new lines
             raw_abstract = raw_abstract.replace("\t", "").replace("\n", "")

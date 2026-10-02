@@ -1,0 +1,224 @@
+{
+ "status": "ok",
+ "message-type": "work",
+ "message-version": "1.0.0",
+ "message": {
+  "DOI": "10.1021/acsnano.5c00546",
+  "title": [
+   "Tunable Nanostructuring for van der Waals Materials"
+  ],
+  "container-title": [
+   "ACS Nano"
+  ],
+  "publisher": "American Chemical Society (ACS)",
+  "type": "journal-article",
+  "volume": "19",
+  "issue": "25",
+  "page": "22820-22836",
+  "published": {
+   "date-parts": [
+    [
+     2025,
+     6,
+     16
+    ]
+   ]
+  },
+  "issn-type": [
+   {
+    "value": "1936-0851",
+    "type": "print"
+   },
+   {
+    "value": "1936-086X",
+    "type": "electronic"
+   }
+  ],
+  "is-referenced-by-count": 16,
+  "author": [
+   {
+    "ORCID": "https://orcid.org/0009-0002-0762-015X",
+    "authenticated-orcid": true,
+    "given": "Gleb I.",
+    "family": "Tselikov",
+    "sequence": "first",
+    "affiliation": [
+     {
+      "name": "Emerging Technologies Research Center, XPANCEO, Dubai Investment Park First, Dubai, United Arab Emirates"
+     }
+    ],
+    "role": [
+     {
+      "vocabulary": "crossref",
+      "role": "author"
+     }
+    ]
+   },
+   {
+    "ORCID": "https://orcid.org/0000-0002-7685-8463",
+    "authenticated-orcid": true,
+    "given": "Anton A.",
+    "family": "Minnekhanov",
+    "sequence": "additional",
+    "affiliation": [
+     {
+      "name": "Emerging Technologies Research Center, XPANCEO, Dubai Investment Park First, Dubai, United Arab Emirates"
+     }
+    ],
+    "role": [
+     {
+      "vocabulary": "crossref",
+      "role": "author"
+     }
+    ]
+   }
+  ],
+  "funder": [
+   {
+    "DOI": "10.13039/501100000288",
+    "name": "Royal Society",
+    "doi-asserted-by": "publisher",
+    "award": [
+     "RSRP\\R\\190000"
+    ],
+    "award-info": [
+     {
+      "award-number": [
+       "RSRP\\R\\190000"
+      ]
+     }
+    ],
+    "id": [
+     {
+      "id": "10.13039/501100000288",
+      "id-type": "DOI",
+      "asserted-by": "publisher"
+     }
+    ]
+   },
+   {
+    "DOI": "10.13039/501100001665",
+    "name": "Agence Nationale de la Recherche",
+    "doi-asserted-by": "publisher",
+    "award": [
+     "ANR-23-CE07-0051"
+    ],
+    "award-info": [
+     {
+      "award-number": [
+       "ANR-23-CE07-0051"
+      ]
+     }
+    ],
+    "id": [
+     {
+      "id": "10.13039/501100001665",
+      "id-type": "DOI",
+      "asserted-by": "publisher"
+     }
+    ]
+   },
+   {
+    "DOI": "10.13039/501100001459",
+    "name": "Ministry of Education - Singapore",
+    "doi-asserted-by": "publisher",
+    "award": [
+     "EDUNC-33-18-279-V12"
+    ],
+    "award-info": [
+     {
+      "award-number": [
+       "EDUNC-33-18-279-V12"
+      ]
+     }
+    ],
+    "id": [
+     {
+      "id": "10.13039/501100001459",
+      "id-type": "DOI",
+      "asserted-by": "publisher"
+     }
+    ]
+   },
+   {
+    "DOI": "10.13039/501100008530",
+    "name": "European Regional Development Fund",
+    "doi-asserted-by": "publisher",
+    "award": [
+     "CZ.02.1.01/0.0/0.0/15_003/0000444"
+    ],
+    "award-info": [
+     {
+      "award-number": [
+       "CZ.02.1.01/0.0/0.0/15_003/0000444"
+      ]
+     }
+    ],
+    "id": [
+     {
+      "id": "10.13039/501100008530",
+      "id-type": "DOI",
+      "asserted-by": "publisher"
+     }
+    ]
+   },
+   {
+    "DOI": "10.13039/501100001823",
+    "name": "Ministerstvo ?kolstv?, Ml?de?e a Telov?chovy",
+    "doi-asserted-by": "publisher",
+    "award": [
+     "LL2101"
+    ],
+    "award-info": [
+     {
+      "award-number": [
+       "LL2101"
+      ]
+     }
+    ],
+    "id": [
+     {
+      "id": "10.13039/501100001823",
+      "id-type": "DOI",
+      "asserted-by": "publisher"
+     }
+    ]
+   },
+   {
+    "DOI": "10.13039/501100001381",
+    "name": "National Research Foundation Singapore",
+    "doi-asserted-by": "publisher",
+    "award": [
+     "AISG3-RP-2022-028"
+    ],
+    "award-info": [
+     {
+      "award-number": [
+       "AISG3-RP-2022-028"
+      ]
+     }
+    ],
+    "id": [
+     {
+      "id": "10.13039/501100001381",
+      "id-type": "DOI",
+      "asserted-by": "publisher"
+     }
+    ]
+   },
+   {
+    "name": "French government",
+    "award": [
+     "A*MIDEX AMX-22-RE-AB-107"
+    ],
+    "award-info": [
+     {
+      "award-number": [
+       "A*MIDEX AMX-22-RE-AB-107"
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

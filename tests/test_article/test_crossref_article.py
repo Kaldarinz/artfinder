@@ -344,3 +344,22 @@ class TestFunderAwards:
             {"name": "National Science Foundation"},
             {"name": "European Research Council"},
         ]
+
+
+class TestAbstract:
+    def test_every_section_body_is_kept(self) -> None:
+        """Removing section titles leaves the text between them."""
+        record = _record(
+            abstract=(
+                "<jats:title>Background</jats:title><jats:p>Lasers ablate.</jats:p>"
+                "<jats:title>Results</jats:title><jats:p>Particles form.</jats:p>"
+            )
+        )
+        assert _row(record)["abstract"] == "lasers ablate.particles form."
+
+    def test_multiline_title_is_removed(self) -> None:
+        """A title broken over lines is removed with its text."""
+        record = _record(
+            abstract="<jats:title>\nAbstract\n</jats:title>\n<jats:p>Lasers ablate.</jats:p>"
+        )
+        assert _row(record)["abstract"] == "lasers ablate."

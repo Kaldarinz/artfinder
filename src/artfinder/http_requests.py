@@ -510,6 +510,11 @@ class FileDownloader:
                                     f"CAPTCHA detected. File: {filename}. URL: {url}"
                                 )
                                 self.failed.append((url, "CAPTCHA detected"))
+                            else:
+                                progress_line.update(
+                                    f"HTML page instead of PDF. File: {filename}. URL: {url}"
+                                )
+                                self.failed.append((url, "HTML page instead of PDF"))
                         else:
                             await self._write_file(save_path, response, progress_line)
                     elif response.status == 403:

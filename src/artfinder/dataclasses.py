@@ -18,6 +18,16 @@ class CrossrefRateLimit(NamedTuple):
     limit: int
     interval: int
 
+@dataclass(frozen=True)
+class FunderRegistryEntry:
+    """A funder as the Crossref Funder Registry names it."""
+
+    name: str
+    "Canonical name."
+    alt_names: list[str] = field(default_factory=list)
+    "Other names the funder is known by: acronyms, translations, former names."
+
+
 class CrossrefResource(StrEnum):
     """
     A class to represent the Crossref API endpoints.

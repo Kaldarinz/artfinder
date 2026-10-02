@@ -25,6 +25,12 @@ FOOTER_AFTER_TABLE_PDF = (
     / "effect of oxygen on colloidal stability of titanium nitride nanoparticles synthesized by laser ablation in liquids.pdf"
 )
 
+# A table whose caption, header row and first column are one text block.
+CAPTION_AND_CELLS_IN_ONE_BLOCK_PDF = (
+    TEST_PDFS_DIR
+    / "silicon-gold nanoparticles affect wharton's jelly phenotype and secretome during tri-lineage differentiation_si.pdf"
+)
+
 
 class TestTableCaptions:
     """Tests for finding tables through their captions."""
@@ -135,3 +141,29 @@ class TestTablesAndParagraphWidth:
 
         assert width.mean == pytest.approx(468.3, abs=1.0)
         assert table.rect.width < width.min, "the table is as wide as a paragraph"
+
+
+class TestCaptionSharingABlockWithCells:
+    """Tests for a caption set in one block with the first cells of its table."""
+
+    def test_caption_stops_before_the_cells(self) -> None:
+        """Test that the header row is not read as caption text."""
+
+        with ArticlePDF(CAPTION_AND_CELLS_IN_ONE_BLOCK_PDF) as article:
+            caption = article.table_captions["S1"]
+
+        assert caption == "Humoral factors measured in MSCs supernatants"
+
+    def test_body_takes_the_cells_and_rules(self) -> None:
+        """Test that the table spans its header row and its outer rules.
+
+        Left out, the rules pass for the graphics of the figure below.
+        """
+
+        with ArticlePDF(CAPTION_AND_CELLS_IN_ONE_BLOCK_PDF) as article:
+            table = article.tables["S1"]
+            figure = article.figures["S1"]
+
+        assert table.rect.y0 < 87.0, "the top rule is not part of the table"
+        assert table.rect.y1 > 315.0, "the bottom rule is not part of the table"
+        assert figure.rect.y0 > table.rect.y1, "the figure reaches into the table"
