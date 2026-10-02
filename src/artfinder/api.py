@@ -22,7 +22,7 @@ import pandas as pd
 from pandas import DataFrame, Series
 
 from artfinder.article import CrossrefArticle
-from artfinder.crossref import Crossref
+from artfinder.crossref import Crossref, SearchError
 from artfinder.http_requests import FileDownloader
 from artfinder.scimagojr import SciMagoJR
 from artfinder.white_list import get_journal_info_sync
@@ -117,7 +117,8 @@ class ArtFinder:
         Use this to get single article by title or doi.
 
         Doi will return exactly requested article, while title will return the first
-        mathing article (title will *always* return some result).
+        matching article. A miss, or a title search that fails, gives an empty
+        Series and a warning.
 
         Parameters
         ----------
@@ -140,12 +141,16 @@ class ArtFinder:
             raise NotImplementedError("Only crossref support is implemented.")
 
         if title is not None:
-            df = (
-                Crossref(email=self.email, print_status=self.print_status)
-                .search(title)
-                .article()
-                .get_df(max_results=1)
-            )
+            try:
+                df = (
+                    Crossref(email=self.email, print_status=self.print_status)
+                    .search(title)
+                    .article()
+                    .get_df(max_results=1)
+                )
+            except SearchError as error:
+                warnings.warn(f"Search for title {title!r} failed: {error}", stacklevel=2)
+                return pd.Series(dtype=object)
         else:
             df = Crossref(email=self.email, print_status=self.print_status).doi(doi)  # type: ignore
         if df.empty:
@@ -170,6 +175,9 @@ class ArtFinder:
     ) -> DataFrame:
         """
         Search for articles.
+
+        A failed request raises `SearchError`; a failed lookup of a hit's
+        funder in the Funder Registry does not, and keeps the deposited name.
 
         Parameters
         ----------
@@ -223,6 +231,8 @@ class ArtFinder:
         """
         Get number of articles, which comply search.
 
+        A failed request raises `SearchError`.
+
         Parameters
         ----------
         query : str | None
@@ -239,9 +249,6 @@ class ArtFinder:
             Can be a string in YYYY, YYYY-MM, YYYY-MM-DD format or a datetime object.
         database : Literal["pubmed", "crossref", "all"]
             Database to search in. Can be "pubmed", "crossref" or "all".
-        max_results : int | None
-            Maximum number of results to return. If None, all results are returned.
-            It is better to check the number of results first using isearch() method
 
         Returns
         -------

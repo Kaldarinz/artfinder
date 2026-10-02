@@ -9,7 +9,7 @@ This module is part of the Artfinder package.
 
 import logging
 from time import time
-from typing import Any, Callable, Coroutine, TypeVar, ParamSpec, Iterator
+from typing import Any, Callable, Coroutine, TypeVar, ParamSpec, Iterator, cast
 from threading import Thread
 from queue import Queue
 import os
@@ -630,15 +630,40 @@ class Etiquette:
 def _execute_coro(func: Callable[P, Coroutine[Any, Any, T]], *args, **kwargs) -> T:
     """
     Launch function asyncronously in separate thread.
+
+    The thread hands back whatever the coroutine raised as well as what it
+    returned, so the caller never waits on a result that will not come.
+
+    Parameters
+    ----------
+    func : Callable[P, Coroutine[Any, Any, T]]
+        Coroutine function to run.
+    *args, **kwargs
+        Arguments to call it with.
+
+    Raises
+    ------
+    BaseException
+        Whatever the coroutine raised, re-raised in the caller's thread.
+
+    Returns
+    -------
+    T
+        What the coroutine returned.
     """
 
-    result_queue: Queue[T] = Queue()
+    outcome: Queue[tuple[T | None, BaseException | None]] = Queue()
 
-    def get_func():
-        result = asyncio.run(func(*args, **kwargs))
-        result_queue.put(result)
+    def get_func() -> None:
+        try:
+            outcome.put((asyncio.run(func(*args, **kwargs)), None))
+        except BaseException as error:  # noqa: BLE001 - re-raised in the caller
+            outcome.put((None, error))
 
     thread = Thread(target=get_func)
     thread.start()
     thread.join()
-    return result_queue.get()
+    result, error = outcome.get()
+    if error is not None:
+        raise error
+    return cast(T, result)

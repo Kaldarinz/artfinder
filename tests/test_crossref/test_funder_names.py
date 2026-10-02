@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from artfinder.article import CrossrefArticle
-from artfinder.crossref import Crossref
+from artfinder.crossref import Crossref, SearchError
 from artfinder.crossref_helpers import funder_registry_id
 from artfinder.http_requests import AsyncHTTPRequest
 
@@ -279,20 +279,18 @@ def test_failed_doi_fetch_gives_empty_frame(crossref: FakeCrossref) -> None:
 
 
 @pytest.mark.parametrize("max_results", [1, None])
-def test_failed_query_gives_empty_frame(
-    crossref: FakeCrossref, max_results: int | None
-) -> None:
-    """A query the API does not answer gives an empty frame, with or without rows."""
-    df = Crossref(print_status=False).search("laser ablation").get_df(max_results)
-    assert df.empty
-    assert list(df.columns) == CrossrefArticle.get_all_slots()
+def test_failed_query_raises(crossref: FakeCrossref, max_results: int | None) -> None:
+    """A query the API does not answer raises, with or without rows."""
+    with pytest.raises(SearchError, match="did not answer the search"):
+        Crossref(print_status=False).search("laser ablation").get_df(max_results)
 
 
-def test_failed_page_keeps_earlier_pages(crossref: FakeCrossref) -> None:
-    """A page that fails mid-pagination ends the results after the pages before it."""
+def test_failed_page_raises(crossref: FakeCrossref) -> None:
+    """A page that fails mid-pagination raises rather than returning part of the
+    results."""
     search = Crossref(print_status=False).search("laser ablation")
     crossref.queued[search.request_url] = [
         {"message": {"items": [WORK["message"]], "next-cursor": "c2"}}
     ]
-    df = search.get_df()
-    assert list(df["doi"]) == [WORK_DOI.lower()]
+    with pytest.raises(SearchError, match="after 1 results"):
+        search.get_df()

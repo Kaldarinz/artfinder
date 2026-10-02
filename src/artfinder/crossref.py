@@ -32,11 +32,35 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+class SearchError(Exception):
+    """
+    A Crossref query that got no answer.
+
+    The request failed with an error status after its retries, raised, or
+    timed out. `AsyncHTTPRequest` logs the cause at error level; the message
+    stays short because it is meant to be shown to a user.
+
+    Parameters
+    ----------
+    message : str
+        What failed, in words.
+    url : str
+        The request that failed.
+    """
+
+    def __init__(self, message: str, url: str) -> None:
+        super().__init__(message)
+        self.url = url
+        "The request that failed."
+
+
 class Endpoint(ABC):
 
     ROW_LIMIT = 100
     "Maximum articles to be retrieved in a single request."
     CONCURRENCY_LIMIT = 5
+    SEARCH_FAILED = "Crossref did not answer the search; see the log for the cause."
+    "Message of the `SearchError` raised when no result of a query arrived."
 
     def __init__(
         self,
@@ -121,6 +145,16 @@ class Endpoint(ABC):
         Note
         ----
         This method will send request to the Crossref API and should be chained the last.
+
+        Raises
+        ------
+        SearchError
+            If the request fails.
+
+        Returns
+        -------
+        int
+            Number of records matching the query.
         """
         request_params = dict(self.request_params)
         request_params["rows"] = 0
@@ -130,8 +164,15 @@ class Endpoint(ABC):
             params=request_params,
             print_progress=False,
         )
+        # `get` returns an empty dict, not None, when the request fails.
+        if "message" not in result:
+            self.status_line("Request failed.")
+            raise SearchError(
+                "Crossref did not answer the count; see the log for the cause.",
+                self.url,
+            )
 
-        num_found = int(result.get("message", {}).get("total-results"))
+        num_found = int(result["message"]["total-results"])
         self.status_line(f"Found {num_found} items.")
 
         return num_found
@@ -176,6 +217,24 @@ class Endpoint(ABC):
         )
 
     def __iter__(self) -> Generator[dict[str, str], None, None]:
+        """
+        Iterate over the records the query finds.
+
+        With `rows` or `sample` set this is a single request; otherwise the
+        results are paged through with a cursor, `ROW_LIMIT` at a time. The
+        request runs in a worker thread, and a failure is raised here, after
+        that thread has returned.
+
+        Raises
+        ------
+        SearchError
+            If a request fails, including one after earlier pages arrived.
+
+        Yields
+        ------
+        dict[str, str]
+            Crossref work records.
+        """
 
         if any(value in self.request_params for value in ["sample", "rows"]):
             if self.request_params.get("rows") is not None:
@@ -189,8 +248,8 @@ class Endpoint(ABC):
             )
             # `get` returns an empty dict, not None, when the request fails.
             if "message" not in result:
-                self.status_line("Found nothing.")
-                return
+                self.status_line("Request failed.")
+                raise SearchError(self.SEARCH_FAILED, self.url)
             self.status_line(f"Fetched {len(result['message']['items'])} items.")
             for item in result["message"]["items"]:
                 yield item
@@ -209,14 +268,14 @@ class Endpoint(ABC):
                 )
 
                 if "message" not in result:
-                    if items_obtained:
-                        logger.warning(
-                            f"Request failed after {items_obtained} items; "
-                            "the results are incomplete."
-                        )
-                    else:
-                        self.status_line("Found nothing.")
-                    return
+                    self.status_line("Request failed.")
+                    if not items_obtained:
+                        raise SearchError(self.SEARCH_FAILED, self.url)
+                    raise SearchError(
+                        f"Crossref stopped answering after {items_obtained} "
+                        "results; see the log for the cause.",
+                        self.url,
+                    )
 
                 if len(result["message"]["items"]) == 0:
                     if items_obtained == 0:
@@ -274,6 +333,9 @@ class Crossref(Endpoint):
     def get_df(self, max_results: int | None = None) -> DataFrame:
         """
         Build data frame query results.
+
+        A failed request raises `SearchError` (see `__iter__`); a failed
+        Funder Registry lookup only logs a warning.
         """
 
         if max_results is not None:

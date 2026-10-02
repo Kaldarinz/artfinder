@@ -262,6 +262,19 @@ class ArticlePDF:
     """Pattern of the heading a supplementary document sets before, or in place
     of, the title of its article: `Supporting Information`, `Supplementary
     Materials:`, `Supporting Online Material for`."""
+    SUPPLEMENT_DETECTION_PATTERN = re.compile(
+        rf"(?:{SUPPLEMENT_HEADING_PATTERN.pattern})"
+        r"|^\s*(?:supplementary\s+"
+        r"(?:fig(?:ure)?s?|tables?|notes?|methods?|appendix|appendices)"
+        r"|online\s+resources?|associated\s+content)\b",
+        re.IGNORECASE,
+    )
+    """Pattern, matched from the start of a line, of a line that marks a
+    supplementary document: whatever `SUPPLEMENT_HEADING_PATTERN` matches, a
+    Nature-style opening (`Supplementary Figure 1 |`, `Supplementary Fig. 1`,
+    `Supplementary Table S1`), Springer's `Online Resource` and ACS's
+    `Associated content`. Wider than `SUPPLEMENT_HEADING_PATTERN`, which
+    strips headings from titles and must not eat `Supplementary Figure`."""
     TITLE_MIN_WORDS = 4
     """Fewest words a title may have. Shorter text set large at the top of a
     page is a journal banner (`Applied Surface Science`), a badge or a heading."""
@@ -299,7 +312,7 @@ class ArticlePDF:
         FileNotFoundError
             If the PDF file does not exist.
         ValueError
-            If the file cannot be opened as a PDF.
+            If the file cannot be opened as a PDF, or needs a password to be read.
         """
 
         self._raw_text_cache: dict[int, tuple[TextBlockPDF, ...]] = KeyedDict(
@@ -359,6 +372,13 @@ class ArticlePDF:
             Exception
         ) as e:  # noqa: BLE001 - pymupdf raises varied types for a bad file
             raise ValueError(f"Failed to open PDF file: {e}")
+        # A user password hides the metadata and every page: `doi` would fail on
+        # the missing metadata and any page read on the encryption.
+        if self.file.needs_pass:
+            self.file.close()
+            raise ValueError(
+                f"PDF is password-protected: {self.identifier or 'PDF from bytes'}"
+            )
 
         if len(self.identifier) == 0:
             if self.doi is not None:
@@ -438,6 +458,81 @@ class ArticlePDF:
         """
 
         return self._get_title()
+
+    @cached_property
+    def is_supplement(self) -> bool:
+        """
+        Whether the document is supplementary material rather than an article.
+
+        True when the first page either carries a supplementary heading set
+        larger than body text near its top (`Supporting Information`,
+        `Associated content`), or opens with a line marking it as one, at any
+        size (`Electronic Supplementary Material (ESI) for …`, `Supplementary
+        Figure 1 |`); see `SUPPLEMENT_DETECTION_PATTERN`. A main text's small
+        `Supporting Information` link line or footnote is neither. Not caught:
+        a supplement that opens directly on `Table S1`, an image-only one, and
+        a letter-spaced heading that extracts as `S UPPORTING I NFORMATION`.
+
+        Returns
+        -------
+        bool
+            Whether the document looks like supplementary material.
+        """
+
+        if self.file.page_count == 0:
+            return False
+        return self._opens_with_supplement_line() or self._has_supplement_heading()
+
+    def _opens_with_supplement_line(self) -> bool:
+        """
+        Internal method to tell whether one of the first page's first two lines
+        marks the document as supplementary material.
+
+        Lines are taken in order of their top, then left edge, at any size and
+        including the header and running matter: an RSC supplement opens with
+        its `Electronic Supplementary Material (ESI) for …` stamp, and sets its
+        heading at body size.
+
+        Returns
+        -------
+        bool
+            Whether either line matches `SUPPLEMENT_DETECTION_PATTERN`.
+        """
+
+        lines = sorted(
+            (
+                line
+                for block in self._text_cache[0]
+                for line in block.lines
+                if line.rotation == 0 and line.text.strip()
+            ),
+            key=lambda line: (line.rect.y0, line.rect.x0),
+        )
+        return any(
+            self.SUPPLEMENT_DETECTION_PATTERN.match(line.text) for line in lines[:2]
+        )
+
+    def _has_supplement_heading(self) -> bool:
+        """
+        Internal method to tell whether the first page carries a supplementary
+        heading where a title could be.
+
+        Returns
+        -------
+        bool
+            Whether a line matching `SUPPLEMENT_DETECTION_PATTERN` passes the
+            size and position test of a title candidate
+            (`_title_candidate_font`).
+        """
+
+        # The pattern goes first: on a page without a match, the document-wide
+        # body font and header are never needed.
+        return any(
+            self.SUPPLEMENT_DETECTION_PATTERN.match(line.text)
+            and self._title_candidate_font(block, line) is not None
+            for block in self._text_cache[0]
+            for line in block.lines
+        )
 
     @cached_property
     def paragraph_width(self) -> Size:
@@ -1793,6 +1888,44 @@ class ArticlePDF:
         page_letters = letters(page_text) if isinstance(page_text, str) else ""
         return not page_letters or letters(text) in page_letters
 
+    def _title_candidate_font(
+        self, block: TextBlockPDF, line: TextLinePDF
+    ) -> tuple[str, float] | None:
+        """
+        Internal method to test a first-page line as a possible part of a title.
+
+        A candidate is horizontal, starts in the top `TITLE_MAX_PAGE_FRACTION`
+        of the page, is set larger than the body by more than
+        `FONT_SIZE_TOLERANCE`, and lies outside the header and running matter.
+        The tests that need the whole document come last.
+
+        Parameters
+        ----------
+        block : TextBlockPDF
+            Block of the first page holding `line`.
+        line : TextLinePDF
+            Line to test.
+
+        Returns
+        -------
+        tuple[str, float] | None
+            The line's font family and size if it is a candidate, otherwise None.
+        """
+
+        page_rect = cast(Rect, self._page(0).rect)
+        max_y = page_rect.y0 + page_rect.height * self.TITLE_MAX_PAGE_FRACTION
+        if line.rotation != 0 or line.rect.y0 > max_y:
+            return None
+        font = self._block_font(TextBlockPDF(rect=line.rect, lines=[line]))
+        if font is None or font[1] <= self.body_font[1] + self.FONT_SIZE_TOLERANCE:
+            return None
+        header = self.header_rect
+        if self._is_running_matter(block.rect) or (
+            not header.is_empty and block.rect.y1 <= header.y1
+        ):
+            return None
+        return font
+
     def _title_from_first_page(self) -> str | None:
         """
         Internal method to read the title off the first page.
@@ -1812,27 +1945,13 @@ class ArticlePDF:
 
         if self.file.page_count == 0:
             return None
-        page_rect = cast(Rect, self._page(0).rect)
-        max_y = page_rect.y0 + page_rect.height * self.TITLE_MAX_PAGE_FRACTION
-        body_size = self.body_font[1]
-        header = self.header_rect
 
         lines_by_font: dict[tuple[str, float], list[TextLinePDF]] = {}
         for block in self._text_cache[0]:
-            if self._is_running_matter(block.rect) or (
-                not header.is_empty and block.rect.y1 <= header.y1
-            ):
-                continue
             for line in block.lines:
-                font = self._block_font(TextBlockPDF(rect=line.rect, lines=[line]))
-                if (
-                    font is None
-                    or line.rotation != 0
-                    or line.rect.y0 > max_y
-                    or font[1] <= body_size + self.FONT_SIZE_TOLERANCE
-                ):
-                    continue
-                lines_by_font.setdefault(font, []).append(line)
+                font = self._title_candidate_font(block, line)
+                if font is not None:
+                    lines_by_font.setdefault(font, []).append(line)
 
         candidates: list[tuple[float, str]] = []
         for (_, size), lines in lines_by_font.items():

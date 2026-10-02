@@ -5,6 +5,9 @@ Tests for ArticlePDF class initialization.
 import pytest
 from pathlib import Path
 import tempfile
+from typing import Any
+
+import pymupdf
 from artfinder.article_pdf import ArticlePDF
 
 
@@ -82,6 +85,53 @@ class TestArticlePDFInitialization:
                 ArticlePDF(tmp_path)
         finally:
             Path(tmp_path).unlink()
+
+    @staticmethod
+    def _encrypted_pdf(tmp_path: Path, user_pw: str | None) -> Path:
+        """
+        Save a one-page PDF encrypted with AES-256.
+
+        Parameters
+        ----------
+        tmp_path : Path
+            Directory to save it in.
+        user_pw : str | None
+            Password needed to read it, or None for an owner password only.
+
+        Returns
+        -------
+        Path
+            The saved PDF.
+        """
+
+        doc = pymupdf.open()
+        # PyMuPDF's `Page` and its constants are invisible to mypy (docs/test_setup.md).
+        page: Any = doc.new_page()
+        page.insert_text((72, 72), "Laser ablation in liquids", fontsize=11)
+        path = tmp_path / "encrypted.pdf"
+        doc.save(
+            path,
+            encryption=getattr(pymupdf, "PDF_ENCRYPT_AES_256"),
+            owner_pw="owner",
+            user_pw=user_pw or "",
+            permissions=0,
+        )
+        return path
+
+    def test_init_with_password_protected_pdf(self, tmp_path: Path) -> None:
+        """A PDF that needs a password to be read is refused at once, as a path or bytes."""
+        path = self._encrypted_pdf(tmp_path, user_pw="user")
+        with pytest.raises(ValueError, match="password-protected"):
+            ArticlePDF(path)
+        with pytest.raises(ValueError, match="password-protected"):
+            ArticlePDF(path.read_bytes())
+
+    def test_init_with_owner_password_only(self, tmp_path: Path) -> None:
+        """An owner password restricts editing, not reading: such a PDF opens."""
+        path = self._encrypted_pdf(tmp_path, user_pw=None)
+        with ArticlePDF(path) as article:
+            assert article.doi is None
+            assert article.is_supplement is False
 
 
     def test_context_manager(self, sample_pdf):
