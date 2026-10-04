@@ -499,39 +499,46 @@ class FileDownloader:
         async with self.concurrency_limiter:
             with self.printer.get_line() as progress_line:
                 progress_line(f"Downloading File: {filename}")
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        # Check if the response is a CAPTCHA
-                        content_type = response.headers.get("Content-Type", "")
-                        if "text/html" in content_type:
-                            content = await response.text()
-                            if "captcha" in content.lower() or "verify" in content.lower():
-                                progress_line.update(
-                                    f"CAPTCHA detected. File: {filename}. URL: {url}"
-                                )
-                                self.failed.append((url, "CAPTCHA detected"))
+                try:
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            # Check if the response is a CAPTCHA
+                            content_type = response.headers.get("Content-Type", "")
+                            if "text/html" in content_type:
+                                content = await response.text()
+                                if "captcha" in content.lower() or "verify" in content.lower():
+                                    progress_line.update(
+                                        f"CAPTCHA detected. File: {filename}. URL: {url}"
+                                    )
+                                    self.failed.append((url, "CAPTCHA detected"))
+                                else:
+                                    progress_line.update(
+                                        f"HTML page instead of PDF. File: {filename}. URL: {url}"
+                                    )
+                                    self.failed.append((url, "HTML page instead of PDF"))
                             else:
-                                progress_line.update(
-                                    f"HTML page instead of PDF. File: {filename}. URL: {url}"
-                                )
-                                self.failed.append((url, "HTML page instead of PDF"))
+                                await self._write_file(save_path, response, progress_line)
+                        elif response.status == 403:
+                            self.restricted.append(url)
+                            progress_line.update(
+                                f"Access denied. HTTP status: {response.status}. File: {filename}"
+                            )
+                        elif response.status == 404:
+                            self.missing.append(url)
+                            progress_line.update(
+                                f"File not found. HTTP status: {response.status}. File: {filename}"
+                            )
                         else:
-                            await self._write_file(save_path, response, progress_line)
-                    elif response.status == 403:
-                        self.restricted.append(url)
-                        progress_line.update(
-                            f"Access denied. HTTP status: {response.status}. File: {filename}"
-                        )
-                    elif response.status == 404:
-                        self.missing.append(url)
-                        progress_line.update(
-                            f"File not found. HTTP status: {response.status}. File: {filename}"
-                        )
-                    else:
-                        self.failed.append((url, response.status))
-                        progress_line.update(
-                            f"Failed to download file. HTTP status: {response.status}. File: {filename}"
-                        )
+                            self.failed.append((url, response.status))
+                            progress_line.update(
+                                f"Failed to download file. HTTP status: {response.status}. File: {filename}"
+                            )
+                except (ClientError, asyncio.TimeoutError) as e:
+                    # One unreachable server must not abort the whole batch
+                    self.failed.append((url, e))
+                    progress_line.update(
+                        f"Error: {type(e).__name__}. File: {filename}. URL: {url}"
+                    )
                 self.print_status()
 
     async def _write_file(
@@ -580,7 +587,7 @@ class FileDownloader:
                         progress_line.update(
                             f"Downloading: {int(downloaded_size)} kb. File: {filename}"
                         )
-            except (ClientError, asyncio.IncompleteReadError) as e:
+            except (ClientError, asyncio.IncompleteReadError, asyncio.TimeoutError) as e:
                 progress_line.update(f"Error: {e}. File: {filename}")
                 self.failed.append((str(response.url), e))
                 # Delete the partially downloaded file
