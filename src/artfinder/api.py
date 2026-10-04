@@ -34,6 +34,32 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
+def _is_spie_proceedings(article: CrossrefArticle | Series) -> bool:
+    """
+    Tell whether an article is in SPIE proceedings.
+
+    The publisher keeps Crossref's case ("SPIE"), so it is compared without it.
+
+    Parameters
+    ----------
+    article : CrossrefArticle | Series
+        Article to check.
+
+    Returns
+    -------
+    bool
+        True for a proceedings article published by SPIE.
+    """
+    article_type = _clean_str(article.type)
+    publisher = _clean_str(article.publisher)
+    return (
+        article_type is not None
+        and article_type.casefold() == "proceedings-article"
+        and publisher is not None
+        and publisher.casefold() == "spie"
+    )
+
+
 def _clean_str(value: object) -> str | None:
     """
     Normalize a string field coming out of a DataFrame or Series.
@@ -391,10 +417,7 @@ class ArtFinder:
             title = _clean_str(article.journal)
             issn = _clean_issn(article.issn)
             # Special treatment of SPIE proceedings
-            if (
-                _clean_str(article.type) == "proceedings-article"
-                and _clean_str(article.publisher) == "spie"
-            ):
+            if _is_spie_proceedings(article):
                 issn = ["0277786X", "1996756X"]
         if title is None and issn is None:
             logger.warning("No journal title or ISSN available, skipping journal lookup.")
@@ -430,10 +453,7 @@ class ArtFinder:
             title = _clean_str(article.journal)
             issn = _clean_issn(article.issn)
             # Special treatment of SPIE proceedings
-            if (
-                _clean_str(article.type) == "proceedings-article"
-                and _clean_str(article.publisher) == "spie"
-            ):
+            if _is_spie_proceedings(article):
                 issn = ["0277786X", "1996756X"]
         if title is None and issn is None:
             logger.warning(

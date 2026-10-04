@@ -144,6 +144,14 @@ class TestGetJournalInfo:
         journal = finder.get_journal_info(article=article)
         assert journal is not None
 
+    def test_spie_override_ignores_case(self) -> None:
+        """The publisher is matched as Crossref spells it, "SPIE"."""
+        finder = ArtFinder(print_status=False)
+        article = _article(
+            journal=pd.NA, issn=[], type_="proceedings-article", publisher="SPIE"
+        )
+        assert finder.get_journal_info(article=article) is not None
+
 
 class TestFindArticleNotFound:
     """find_article must not present a missing article as usable metadata."""

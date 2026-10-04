@@ -346,20 +346,97 @@ class TestFunderAwards:
         ]
 
 
+class TestTitle:
+    """A title comes back as plain text, in Crossref's case."""
+
+    # The title of 10.1002/adfm.202524090 as Crossref returns it.
+    MARKED_UP = (
+        "Shaping Ti\n    <sub>3</sub>\n    C\n    <sub>2</sub>\n"
+        "    MXene Nanospheres for Precision Near\u2010Infrared Photothermal Therapy"
+    )
+
+    def test_markup_and_line_breaks_are_removed(self) -> None:
+        """Tags are stripped and pretty-printing whitespace is collapsed."""
+        assert _row(_record(title=[self.MARKED_UP]))["title"] == (
+            "Shaping Ti 3 C 2 MXene Nanospheres for Precision "
+            "Near\u2010Infrared Photothermal Therapy"
+        )
+
+    def test_escaped_markup_is_removed(self) -> None:
+        """Markup escaped once or twice is stripped after unescaping."""
+        record = _record(
+            title=["&lt;title&gt;H&lt;sub&gt;2&lt;/sub&gt;O &amp; Au&lt;/title&gt;"]
+        )
+        assert _row(record)["title"] == "H2O & Au"
+
+    def test_bare_angle_brackets_are_kept(self) -> None:
+        """A size threshold is text, not a tag spanning to the next bracket."""
+        record = _record(title=["Small (<5 nm) and large (>20 nm) particles"])
+        assert _row(record)["title"] == "Small (<5 nm) and large (>20 nm) particles"
+
+    def test_empty_title_is_none(self) -> None:
+        """A title of markup and whitespace alone is no title."""
+        assert pd.isna(_row(_record(title=["  <i> </i> "]))["title"])
+
+
+class TestCaseIsKept:
+    """Text keeps Crossref's case; only the DOI and type are lowercased."""
+
+    RECORD = _record(
+        DOI="10.1021/ACS.JPCC.1",
+        title=["Au Nanoparticles by LAL in H2O"],
+        abstract="<jats:p>MXenes and TiO2.</jats:p>",
+        publisher="SPIE",
+        type="journal-article",
+        page="S12-S19",
+    )
+
+    def test_text_fields_keep_case(self) -> None:
+        """Title, abstract, publisher and pages are left as given."""
+        row = _row(self.RECORD)
+        assert row["title"] == "Au Nanoparticles by LAL in H2O"
+        assert row["abstract"] == "MXenes and TiO2."
+        assert row["publisher"] == "SPIE"
+        assert (row["start_page"], row["end_page"]) == ("S12", "S19")
+
+    def test_doi_is_lowercased(self) -> None:
+        """DOIs are case-insensitive and listed in lowercase, as references are."""
+        assert _row(self.RECORD)["doi"] == "10.1021/acs.jpcc.1"
+
+    def test_csv_round_trip_keeps_case(self, tmp_path: Path) -> None:
+        """Reading a CSV back leaves the case alone."""
+        row = _csv_row(self.RECORD, tmp_path)
+        assert row["title"] == "Au Nanoparticles by LAL in H2O"
+        assert row["abstract"] == "MXenes and TiO2."
+        assert row["publisher"] == "SPIE"
+
+
 class TestAbstract:
     def test_every_section_body_is_kept(self) -> None:
-        """Removing section titles leaves the text between them."""
+        """Removing section titles leaves the text between them, spaced."""
         record = _record(
             abstract=(
                 "<jats:title>Background</jats:title><jats:p>Lasers ablate.</jats:p>"
                 "<jats:title>Results</jats:title><jats:p>Particles form.</jats:p>"
             )
         )
-        assert _row(record)["abstract"] == "lasers ablate.particles form."
+        assert _row(record)["abstract"] == "Lasers ablate. Particles form."
 
     def test_multiline_title_is_removed(self) -> None:
         """A title broken over lines is removed with its text."""
         record = _record(
             abstract="<jats:title>\nAbstract\n</jats:title>\n<jats:p>Lasers ablate.</jats:p>"
         )
-        assert _row(record)["abstract"] == "lasers ablate."
+        assert _row(record)["abstract"] == "Lasers ablate."
+
+    def test_inline_markup_and_entities(self) -> None:
+        """Inline tags vanish, entities are decoded and line breaks become spaces."""
+        record = _record(
+            abstract=(
+                "<jats:p>\n  2D materials such as Ti<jats:sub>3</jats:sub>C"
+                "<jats:sub>2</jats:sub>\n  absorb &lt;5% &amp; heat.\n</jats:p>"
+            )
+        )
+        assert _row(record)["abstract"] == (
+            "2D materials such as Ti3C2 absorb <5% & heat."
+        )

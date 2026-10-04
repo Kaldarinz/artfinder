@@ -144,7 +144,7 @@ def test_hits_have_candidate_columns(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(df) == 1
     row = df.iloc[0]
     assert row["doi"] == "10.1021/acsnano.5c00546"
-    assert row["title"] == "tunable nanostructuring for van der waals materials"
+    assert row["title"] == "Tunable Nanostructuring for van der Waals Materials"
     assert row["journal"] == "ACS Nano"
     assert row["authors"][0]["lastname"] == "Tselikov"
     assert str(row["publication_date"]) == "2025-06-16"

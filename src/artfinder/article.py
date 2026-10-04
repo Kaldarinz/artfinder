@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime
+import html
 import logging
 import re
 from ast import literal_eval
@@ -30,6 +31,42 @@ LIST_COLUMNS = (
     "keywords",
     "issn",
 )
+
+#: Scalar columns folded to lowercase: identifiers and Crossref's vocabulary,
+#: not text. Everything else keeps the case Crossref gives it.
+LOWERCASE_COLUMNS = ("doi", "type")
+
+_MARKUP_TAG = re.compile(r"</?[A-Za-z][\w.-]*(?::[\w.-]+)?\b[^<>]*>")
+"""An HTML, MathML or JATS tag, as opposed to a bare `<`.
+
+A letter-led name is required, so a size threshold such as `(<5 nm) ... (>20 nm)`
+is not mistaken for one tag spanning both.
+"""
+
+_BLOCK_TAG = re.compile(r"</?(?:jats:)?(?:p|sec)\b[^<>]*>")
+"""A JATS paragraph or section tag, which separates the text on either side."""
+
+
+def _strip_markup(text: str) -> str:
+    """
+    Reduce Crossref text to plain text.
+
+    Tags are stripped on both sides of unescaping, because some deposits escape
+    their markup twice (`&lt;sub&gt;`). Whitespace, including the line breaks and
+    indentation of pretty-printed XML, is collapsed to single spaces.
+
+    Parameters
+    ----------
+    text : str
+        Text as Crossref returns it.
+
+    Returns
+    -------
+    str
+        Plain text.
+    """
+    text = html.unescape(_MARKUP_TAG.sub("", text))
+    return " ".join(_MARKUP_TAG.sub("", text).split())
 
 
 # TODO: There should probably be only one Article class
@@ -67,10 +104,11 @@ class Article:
         """
         Convert the parsed information to a Python dict.
 
-        Scalar fields other than the journal are stringified and lowercased.
-        List-valued fields (`LIST_COLUMNS`) are left as Python objects: their
-        text is case-sensitive (URLs, ISSN check digits, names), and their
-        repr would carry any None inside them as text.
+        Scalar fields are stringified, keeping their case, except the DOI and
+        type (`LOWERCASE_COLUMNS`), which are lowercased. List-valued fields
+        (`LIST_COLUMNS`) are left as Python objects: their text is
+        case-sensitive (URLs, ISSN check digits, names), and their repr would
+        carry any None inside them as text.
 
         Returns
         -------
@@ -81,10 +119,7 @@ class Article:
         for key, val in dct.items():
             if val is None or key in LIST_COLUMNS:
                 continue
-            if key == "journal":
-                dct[key] = str(val)
-            else:
-                dct[key] = str(val).lower()
+            dct[key] = str(val).lower() if key in LOWERCASE_COLUMNS else str(val)
         return dct
 
     @classmethod
@@ -261,14 +296,24 @@ class CrossrefArticle(Article):
         return journal[0].strip().replace("&amp;", "and")
 
     def _extract_title(self, data: dict[str, Any]) -> str | None:
-        """Extract the title from the data."""
-        title = data.get("title", [""])
-        if len(title) == 0 or title[0] == "":
-            return None
-        # some titles contain garbage like '&lt;title&gt;' and '&lt;/title&gt;'
-        # remove it
-        title = re.sub(r"&lt;/?title&gt;", "", title[0])
-        return title.strip()
+        """
+        Extract the title from the data, as plain text.
+
+        Crossref titles can carry markup (`<sub>`, MathML, a stray escaped
+        `&lt;title&gt;`) and the line breaks of pretty-printed XML.
+
+        Parameters
+        ----------
+        data : dict[str, Any]
+            Crossref work record.
+
+        Returns
+        -------
+        str | None
+            The title, or None when the record has none.
+        """
+        titles = data.get("title") or [""]
+        return _strip_markup(titles[0]) or None
 
     def _extract_authors(
         self, data: dict[str, Any]
@@ -420,20 +465,32 @@ class CrossrefArticle(Article):
         return None
 
     def _extract_abstract(self, data: dict[str, Any]) -> str | None:
-        """Extract the abstract from the data."""
+        """
+        Extract the abstract from the data, as plain text.
+
+        Section titles (`<jats:title>`) are dropped with their text, paragraphs
+        and sections are separated by a space, and the rest is cleaned as a
+        title is (`_strip_markup`).
+
+        Parameters
+        ----------
+        data : dict[str, Any]
+            Crossref work record.
+
+        Returns
+        -------
+        str | None
+            The abstract, or None when the record has none.
+        """
 
         raw_abstract = data.get("abstract")
-        if raw_abstract is not None:
-            # Remove <jats:title> tags and other XML tags
-            raw_abstract = re.sub(
-                r"<jats:title>.*?</jats:title>", "", raw_abstract, flags=re.DOTALL
-            )
-            raw_abstract = re.sub(r"<[^>]+>", "", raw_abstract).strip()
-            # Remove tabs and new lines
-            raw_abstract = raw_abstract.replace("\t", "").replace("\n", "")
-            if len(raw_abstract) > 1:
-                return raw_abstract
-        return None
+        if raw_abstract is None:
+            return None
+        raw_abstract = re.sub(
+            r"<jats:title>.*?</jats:title>", "", raw_abstract, flags=re.DOTALL
+        )
+        abstract = _strip_markup(_BLOCK_TAG.sub(" ", raw_abstract))
+        return abstract if len(abstract) > 1 else None
 
     @classmethod
     def col_types(cls) -> Dict[str, str]:
@@ -516,10 +573,6 @@ def _format_df(df: DataFrame) -> DataFrame:
     for col in cols:
         if col not in df.columns:
             df[col] = pd.NA
-    # Convert to lower case. A column empty in every row reads back from a CSV
-    # as float NaN, which the .str accessor refuses.
-    for col in ["title", "abstract", "publisher"]:
-        df[col] = df[col].astype("string").str.lower()
     for col in LIST_COLUMNS:
         df[col] = df[col].map(_parse_list_value)
     # apply column types
