@@ -4,8 +4,11 @@ Tests for ArticlePDF figure rectangle extraction.
 
 import json
 import pytest
+from collections.abc import Iterator
 from pathlib import Path
 from pytest import approx
+from pymupdf import Rect
+
 from artfinder.article_pdf import ArticlePDF
 
 
@@ -131,3 +134,52 @@ class TestFigureRectangles:
             pytest.fail(
                 f"Rectangle extraction failed for {len(failed)}/{len(expected_rectangles)} PDFs:\n{fail_msg}"
             )
+
+
+FRAMED_FIGURES_PDF = (
+    "laser ablation-based one-step generation and bio-functionalization of gold"
+    " nanoparticles conjugated with aptamers.pdf"
+)
+
+
+class TestFramePieces:
+    """A frame around a figure and its caption, drawn as separate shapes."""
+
+    # BMC's rounded box: hairline edges and 4 x 4 pt corner arcs.
+    FRAME = [
+        Rect(60.7, 536.1, 286.6, 536.4),
+        Rect(286.6, 536.1, 290.6, 540.1),
+        Rect(290.3, 540.1, 290.6, 726.2),
+        Rect(286.6, 726.2, 290.6, 730.2),
+        Rect(60.7, 730.0, 286.6, 730.2),
+        Rect(56.7, 726.2, 60.7, 730.2),
+        Rect(56.7, 540.1, 56.9, 726.2),
+        Rect(56.7, 536.1, 60.7, 540.1),
+    ]
+    CAPTION = Rect(62.9, 697.9, 284.3, 725.8)
+
+    @pytest.fixture
+    def article(self) -> Iterator[ArticlePDF]:
+        with ArticlePDF(TEST_PDFS_DIR / FRAMED_FIGURES_PDF) as article:
+            yield article
+
+    def test_pieces_framing_a_caption(self, article: ArticlePDF) -> None:
+        """Every piece of an outline holding a caption is found."""
+        assert article._frame_pieces(self.FRAME, [self.CAPTION]) == set(range(8))
+
+    def test_pieces_framing_no_text(self, article: ArticlePDF) -> None:
+        """An outline holding no caption or paragraph — the axes of a plot — stays."""
+        assert article._frame_pieces(self.FRAME, [Rect(0, 0, 10, 10)]) == set()
+
+    def test_figure_inside_the_frame_stays(self, article: ArticlePDF) -> None:
+        """A drawing within the outline, off its border, is no piece of it."""
+        inside = Rect(70, 600, 72, 650)
+        found = article._frame_pieces([*self.FRAME, inside], [self.CAPTION])
+        assert found == set(range(8))
+
+    def test_figures_sit_above_their_captions(self, article: ArticlePDF) -> None:
+        """No figure is taken for the bottom of its frame, just under its caption."""
+        assert len(article.figures) == 8
+        for figure in article.figures.values():
+            assert figure.rect.y1 <= figure.caption.rect.y0
+            assert figure.rect.height > ArticlePDF.MIN_FIGURE_SIDE

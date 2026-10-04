@@ -4178,6 +4178,79 @@ class ArticlePDF:
         )
         return stroked or filled
 
+    def _frame_pieces(
+        self, drawing_rects: Sequence[Rect], text_rects: Sequence[Rect]
+    ) -> set[int]:
+        """
+        Internal method to find the drawings that together frame text.
+
+        A frame can be drawn as separate shapes: BMC draws the rounded box
+        around a figure and its caption as four hairline edges and four corner
+        arcs. No piece contains the caption, so none passes for a frame, and
+        the bottom edge with its corners, just under the caption, is nearer to
+        it than the figure is. Pieces are hairlines or shapes too small to be
+        a figure on their own; those touching end to end make one outline,
+        which frames text if it holds a caption or paragraph and every piece
+        lies on its border.
+
+        Parameters
+        ----------
+        drawing_rects : Sequence[Rect]
+            Drawings of the page.
+        text_rects : Sequence[Rect]
+            Captions and paragraphs of the page.
+
+        Returns
+        -------
+        set[int]
+            Indices into `drawing_rects` of the pieces of such frames.
+        """
+
+        pieces = [
+            i
+            for i, rect in enumerate(drawing_rects)
+            if min(rect.width, rect.height) < self.MAX_HAIRLINE_WIDTH
+            or max(rect.width, rect.height) < self.MIN_FIGURE_SIDE
+        ]
+        # Union-find over pieces touching within `MARGIN`.
+        parent = {i: i for i in pieces}
+
+        def root(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        for n, i in enumerate(pieces):
+            for j in pieces[n + 1 :]:
+                if self._gap_between(drawing_rects[i], drawing_rects[j]) <= self.MARGIN:
+                    parent[root(i)] = root(j)
+        outlines: dict[int, list[int]] = {}
+        for i in pieces:
+            outlines.setdefault(root(i), []).append(i)
+
+        result: set[int] = set()
+        for members in outlines.values():
+            if len(members) < 2:
+                continue
+            outline = drawing_rects[members[0]]
+            for i in members[1:]:
+                outline = self._span(outline, drawing_rects[i])
+            if not any(outline.contains(text) for text in text_rects):
+                continue
+            if all(
+                min(
+                    rect.x0 - outline.x0,
+                    rect.y0 - outline.y0,
+                    outline.x1 - rect.x1,
+                    outline.y1 - rect.y1,
+                )
+                <= self.MARGIN
+                for rect in (drawing_rects[i] for i in members)
+            ):
+                result.update(members)
+        return result
+
     def _get_figure_graphics(
         self,
         page_no: int,
@@ -4190,7 +4263,8 @@ class ArticlePDF:
         Left out are what only looks like part of a figure: the page furniture
         in the header and footer bands, a table's ruling, a rule of the page
         (a hairline most of the page wide), decoration bleeding off the page
-        edge, a frame drawn around text, the edges of a box fitted around a
+        edge, a frame drawn around text — whole or in pieces (see
+        `_frame_pieces`) — the edges of a box fitted around a
         caption or a border beside a caption, anything invisible (see `_is_visible_drawing`) and a background lying mostly
         under a caption.
         An image whose blank margin runs under its caption is cut short at the
@@ -4220,6 +4294,12 @@ class ArticlePDF:
             (copy(drawing.rect), drawing.width if drawing.type in ("s", "fs") else 0.0)
             for drawing in self._drawings_cache[page_no]
             if self._is_visible_drawing(drawing)
+        ]
+        frame_pieces = self._frame_pieces(
+            [rect for rect, _ in candidates], [*caption_rects, *paragraph_rects]
+        )
+        candidates = [
+            candidate for i, candidate in enumerate(candidates) if i not in frame_pieces
         ]
         candidates += [(rect, 0.0) for rect in self.get_image_rects(page_no)]
         # A box drawn around a caption, too close to it on every side to hold a
