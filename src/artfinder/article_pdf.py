@@ -2038,10 +2038,6 @@ class ArticlePDF:
         `MIN_FIGURE_DPI`..`MAX_FIGURE_DPI`; a figure drawn entirely in vectors
         and text has no raster to measure and gets `VECTOR_FIGURE_DPI`.
 
-        An image is measured over its whole placement box, not over the part
-        its clipping path leaves visible — the pixels are spread over the box —
-        so a cropped one reads at its true resolution.
-
         Parameters
         ----------
         figure_label : str
@@ -2053,23 +2049,97 @@ class ArticlePDF:
             DPI to rasterize the figure at.
         """
 
-        placements = [
-            (image, Rect(0, 0, 1, 1) * image.transform)
-            for image in self.get_figure_images(figure_label)
-        ]
-        dpis = [
-            max(
-                image.width * self.POINTS_PER_INCH / placement.width,
-                image.height * self.POINTS_PER_INCH / placement.height,
-            )
-            for image, placement in placements
-            if image.width
-            and image.height
-            and placement.width > 0
-            and placement.height > 0
-        ]
+        raster_dpi = self._raster_dpi(self.get_figure_images(figure_label))
+        return self.VECTOR_FIGURE_DPI if raster_dpi is None else raster_dpi
+
+    def region_dpi(self, page_index: int, rect: Rect) -> int:
+        """
+        Resolution to rasterize an arbitrary region of a page at.
+
+        The region is given as the page is displayed: in the coordinates of
+        `page.rect` and `Page.get_pixmap(clip=...)`, which on a rotated page
+        differ from those of the page's text, drawings and images. A region
+        overlapped by any visible drawing is rendered at `VECTOR_FIGURE_DPI`,
+        so a plot's axes and tick labels keep their sharpness even beside a
+        coarser raster. Otherwise the images it intersects set the rate, as
+        in `_figure_dpi`, and a region holding neither, such as text alone,
+        gets `VECTOR_FIGURE_DPI`.
+
+        A drawing overlaps when the two rectangles meet as closed intervals
+        on both axes: a straight axis line or tick has a rectangle of zero
+        width or height, which `Rect.intersects` never reports, and a long
+        rule may cross the region without lying inside it.
+
+        Parameters
+        ----------
+        page_index : int
+            Page number (0-indexed).
+        rect : Rect
+            Region in the page's displayed coordinates, in points.
+
+        Returns
+        -------
+        int
+            DPI to rasterize the region at.
+        """
+
+        region = Rect(rect) * self._page(page_index).derotation_matrix
+        region.normalize()
+        for drawing in self._drawings_cache[page_index]:
+            bounds = drawing.rect
+            if (
+                bounds.x0 <= region.x1
+                and bounds.x1 >= region.x0
+                and bounds.y0 <= region.y1
+                and bounds.y1 >= region.y0
+                and self._is_visible_drawing(drawing)
+            ):
+                return self.VECTOR_FIGURE_DPI
+        raster_dpi = self._raster_dpi(
+            image
+            for image in self._images_cache[page_index]
+            if image.rect.intersects(region)
+        )
+        return self.VECTOR_FIGURE_DPI if raster_dpi is None else raster_dpi
+
+    def _raster_dpi(self, images: Iterable[ImageInfoPDF]) -> int | None:
+        """
+        Resolution of the sharpest of some raster images, clamped.
+
+        An image is measured over its whole placement box, not over the part
+        its clipping path leaves visible — the pixels are spread over the box —
+        so a cropped one reads at its true resolution.
+
+        Parameters
+        ----------
+        images : Iterable[ImageInfoPDF]
+            Images to measure.
+
+        Returns
+        -------
+        int | None
+            The highest native resolution, clamped to
+            `MIN_FIGURE_DPI`..`MAX_FIGURE_DPI`, or None when no image has a
+            measurable placement.
+        """
+
+        dpis = []
+        for image in images:
+            placement = Rect(0, 0, 1, 1) * image.transform
+            if (
+                image.width
+                and image.height
+                and placement.width > 0
+                and placement.height > 0
+            ):
+                dpis.append(
+                    max(
+                        image.width * self.POINTS_PER_INCH / placement.width,
+                        image.height * self.POINTS_PER_INCH / placement.height,
+                    )
+                )
         if not dpis:
-            return self.VECTOR_FIGURE_DPI
+            return None
         return int(
             min(self.MAX_FIGURE_DPI, max(self.MIN_FIGURE_DPI, round(max(dpis))))
         )
