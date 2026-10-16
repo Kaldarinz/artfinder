@@ -406,5 +406,14 @@
         "6": "TEM analysis of AuNPs conjugated with aptamers against streptavidin. TEM micrographs of AuNPs without streptavidin (i), and after incubation with streptavidin (ii). The insert displays a scheme of the proposed composition of the agglomerates. Please note that the agglomerates are displayed in a simplified manner in the scheme, de facto streptavidin is not planar but tetrahedral.",
         "7": "Dot blot. Dot blot detection of streptavidin, using aptamer-conjugated gold nanoparticles (A). ESEM image of nanoparticles bound to streptavidin immobilized on the nitrocellulose membrane (B).",
         "8": "Detection of PSMA in human prostate cancer tissue. Detection of PSMA positive structures in prostate cancer tissue sections by immunohistochemical staining using anti-PSMA aptamer (PSMA apt)-conjugated AuNPs. As a negative control, AuNPs conjugated with miniStrep aptamer (miniStrep apt) were used. A polyclonal antibody directed against PSMA (PSMA pAb) was used as a positive control. Positive control was additionally stained with Haematoxylin and Eosin. Black arrows indicate specific staining, while white arrows flag unspecific binding."
+    },
+    "dependence of laser ablation produced gold nanoparticles characteristics on the fluence of laser pulse.pdf": {
+        "1": "Au NPs in distilled water prepared by laser ablation process. Darker color is due to higher number of nanoparticles in the suspensions because of higher laser fluence during the ablation process.",
+        "2": "Variation of the mass of the target during the ablation versus laser pulse fluence for 1000 laser pulses.",
+        "3": "X-ray diffraction pattern of Au target and Au nanoparticle after drying the suspensions on silicon at room temperature.",
+        "4": "UV-Vis-NIR absorption spectrum of Au NPs in distilled water, with distilled water as the reference.",
+        "5": "SEM micrographs of Au nanoparticle samples dried on aluminum foil.",
+        "6": "Au nanoparticle hydrodynamic size distribution measured by Dynamic Light Scattering (DLS) device.",
+        "7": "TEM image and size distribution of Au nanoparticle generated in distilled water with laser ablation mechanism."
     }
 }

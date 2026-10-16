@@ -3587,6 +3587,55 @@ class ArticlePDF:
                 return TextBlockPDF(rect=rect, lines=lines[:k]), True
         return block, False
 
+    @classmethod
+    def _cut_at_blank_line(cls, block: TextBlockPDF) -> tuple[TextBlockPDF, bool]:
+        """
+        Internal method to end a caption block before the paragraph that follows.
+
+        A word processor can put a caption and the paragraph beneath it in one
+        block, separated by an empty line, which is dropped with the other blank
+        lines. What is left of it is a gap: the next line sits two lines below
+        rather than one. Once the caption's leading is known from its first two
+        lines, the first line set more than that leading and
+        `MAX_SINGLE_SPACING` line heights below the one before it is where the
+        caption ends — the same test that keeps a following block out of it.
+        Lines are compared by both edges and the nearer pair counts: a
+        subscript lowers the bottom of a line and a superscript raises its top.
+
+        Parameters
+        ----------
+        block : TextBlockPDF
+            Block opening with a caption.
+
+        Returns
+        -------
+        tuple[TextBlockPDF, bool]
+            The block cut before the first line after a blank one, and whether
+            it was cut.
+        """
+
+        lines = block.lines
+        pitch: float | None = None
+        last = lines[0].rect
+        for k in range(1, len(lines)):
+            rect = lines[k].rect
+            gap = min(rect.y0 - last.y0, rect.y1 - last.y1)
+            # A piece of the same line, split off at a change of font.
+            if gap < 0.5 * min(rect.height, last.height):
+                continue
+            if pitch is None:
+                pitch = gap
+            elif gap > max(
+                cls.MAX_SINGLE_SPACING * last.height,
+                (1 + cls.LINE_PITCH_TOLERANCE) * pitch,
+            ):
+                cut = Rect()
+                for line in lines[:k]:
+                    cut.include_rect(line.rect)
+                return TextBlockPDF(rect=cut, lines=lines[:k]), True
+            last = rect
+        return block, False
+
     def _find_captions(
         self, pattern: re.Pattern[str]
     ) -> dict[int, tuple[FigureCaptionPDF, ...]]:
@@ -3648,6 +3697,8 @@ class ArticlePDF:
                         block = block + text_blocks[i]
 
                     block, cut = self._cut_at_table_row(block)
+                    if not cut:
+                        block, cut = self._cut_at_blank_line(block)
 
                     # Case 3: caption split in several blocks. Check if the first line
                     # of the next block is one line down from the last line of current block.
