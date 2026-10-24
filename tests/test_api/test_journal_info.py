@@ -192,3 +192,47 @@ class TestFindArticleNotFound:
         finder = ArtFinder(print_status=False)
         article = finder.find_article(doi="10.1073/pnas")
         assert finder.get_journal_info(article=article) is None
+
+
+class TestPublisherCountry:
+    """The country SciMagoJR returns is the publisher's, not the journal's."""
+
+    def test_most_common_country_per_publisher(self) -> None:
+        """Each publisher gets the country most of its journals give."""
+        data = pd.DataFrame(
+            {
+                "Publisher": ["Pub A", "Pub A", "Pub A", "Pub B", "pub a", None],
+                "Country": [
+                    "Netherlands",
+                    "China",
+                    "Netherlands",
+                    "Germany",
+                    "China",
+                    "Japan",
+                ],
+            }
+        )
+        assert SciMagoJR.publisher_country_map(data) == {
+            "Pub A": "Netherlands",
+            "Pub B": "Germany",
+            "pub a": "China",
+        }
+
+    def test_tie_goes_to_alphabetically_first_country(self) -> None:
+        """Equally common countries resolve to the one that sorts first."""
+        data = pd.DataFrame(
+            {
+                "Publisher": ["Pub", "Pub", "Pub", "Pub"],
+                "Country": ["United Kingdom", "China", "China", "United Kingdom"],
+            }
+        )
+        assert SciMagoJR.publisher_country_map(data) == {"Pub": "China"}
+
+    def test_get_journal_returns_publisher_country(self) -> None:
+        """A journal set in another country reports its publisher's country."""
+        journal = SciMagoJR("latest").get_journal(
+            title="Progress in Natural Science: Materials International"
+        )
+        assert journal is not None
+        assert journal.publisher == "Elsevier B.V."
+        assert journal.country == "Netherlands"

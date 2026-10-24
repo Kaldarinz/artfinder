@@ -32,6 +32,40 @@ class SciMagoJR:
             raise NotImplementedError(
                 "Only 'latest' ranking year is supported currently."
             )
+        self.publisher_countries = self.publisher_country_map(self.all_data)
+
+    @staticmethod
+    def publisher_country_map(data: pd.DataFrame) -> dict[str, str]:
+        """
+        Map each publisher to the country most of its journals give.
+
+        SciMagoJR's "Country" is the journal's country, which varies across one
+        publisher's journals: most Elsevier B.V. journals give the Netherlands, a
+        few give China. The publisher's country is taken as the most common
+        "Country" over the rows with exactly that "Publisher". A tie goes to the
+        country that sorts first alphabetically. Rows without a publisher or a
+        country are ignored.
+
+        Parameters
+        ----------
+        data
+            SciMagoJR data with "Publisher" and "Country" columns.
+
+        Returns
+        -------
+        dict[str, str]
+            Country of each publisher, keyed by the "Publisher" value.
+        """
+        counts = (
+            data.dropna(subset=["Publisher", "Country"])
+            .groupby(["Publisher", "Country"])
+            .size()
+            .reset_index(name="journals")
+        )
+        modes = counts.sort_values(
+            ["Publisher", "journals", "Country"], ascending=[True, False, True]
+        ).drop_duplicates("Publisher")
+        return dict(zip(modes["Publisher"], modes["Country"]))
 
     def get_journal(
         self, title: str | None = None, issn: list[str] | None = None
@@ -40,13 +74,18 @@ class SciMagoJR:
         Get journal data for a given title or ISSN.
 
         Parameters
-        -----------
-            title: The title of the journal.
-            issn: The ISSN of the journal. Should be in format '12345678' or '12345678X'
+        ----------
+        title
+            The title of the journal.
+        issn
+            ISSNs of the journal, each in the format '12345678' or '1234567X'.
 
         Returns
         -------
-            A pandas Series containing the journal data, or None if not found.
+        pd.Series | None
+            The journal data, or None if not found. "country" is the publisher's
+            country (see `publisher_country_map`), not SciMagoJR's per-journal
+            "Country"; a journal without a publisher keeps its own.
         """
 
         # Callers pass values straight out of a DataFrame, where an absent title is
@@ -109,6 +148,9 @@ class SciMagoJR:
             "categories",
             "areas",
         ]
+        journal["country"] = self.publisher_countries.get(
+            journal["publisher"], journal["country"]
+        )
         # Add abbreviation
         journal["abbreviation"] = Abbreviate.create()(
             title=journal.title, remove_part=True
