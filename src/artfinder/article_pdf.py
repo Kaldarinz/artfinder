@@ -3587,6 +3587,44 @@ class ArticlePDF:
                 return TextBlockPDF(rect=rect, lines=lines[:k]), True
         return block, False
 
+    @staticmethod
+    def _line_core(line: TextLinePDF) -> Rect:
+        """
+        Internal method to find the part of a line set at its main size.
+
+        A superscript raises the top of a line's rectangle and a subscript
+        lowers its bottom — Elsevier sets the space after an exponent raised
+        too — so two lines of one caption, one carrying `10⁻⁴`, measure further
+        apart or closer together than their leading. Spans flagged superscript
+        and spans smaller than the largest are left out; what remains spans
+        the line's own ascent and descent.
+
+        Parameters
+        ----------
+        line : TextLinePDF
+            Line to measure.
+
+        Returns
+        -------
+        Rect
+            Rectangle of the line's main-size spans, or of the whole line when
+            every span is a superscript.
+        """
+
+        spans = [
+            span
+            for span in line.spans
+            if not span.flags & pymupdf.TEXT_FONT_SUPERSCRIPT and span.text.strip()
+        ]
+        if not spans:
+            return Rect(line.rect)
+        size = max(span.size for span in spans)
+        core = Rect()
+        for span in spans:
+            if span.size >= size - 0.5:
+                core.include_rect(span.rect)
+        return core
+
     @classmethod
     def _cut_at_blank_line(cls, block: TextBlockPDF) -> tuple[TextBlockPDF, bool]:
         """
@@ -3599,8 +3637,9 @@ class ArticlePDF:
         lines, the first line set more than that leading and
         `MAX_SINGLE_SPACING` line heights below the one before it is where the
         caption ends — the same test that keeps a following block out of it.
-        Lines are compared by both edges and the nearer pair counts: a
-        subscript lowers the bottom of a line and a superscript raises its top.
+        Lines are compared by their `_line_core`: a superscript raises the top
+        of its line and a subscript lowers its bottom, and on the caption's
+        second line either one would misread its leading.
 
         Parameters
         ----------
@@ -3616,10 +3655,10 @@ class ArticlePDF:
 
         lines = block.lines
         pitch: float | None = None
-        last = lines[0].rect
+        last = cls._line_core(lines[0])
         for k in range(1, len(lines)):
-            rect = lines[k].rect
-            gap = min(rect.y0 - last.y0, rect.y1 - last.y1)
+            rect = cls._line_core(lines[k])
+            gap = rect.y1 - last.y1
             # A piece of the same line, split off at a change of font.
             if gap < 0.5 * min(rect.height, last.height):
                 continue
