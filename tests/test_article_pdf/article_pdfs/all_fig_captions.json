@@ -426,5 +426,17 @@
         "7": "Setup of the ground wiring experiment, from the left there are AuNP s synthesized via: Turkevitch chemical process, PLAL in KCl 10 \u0003 4 M, PLAL in milli-Q deionized water and PLAL in citrate 2 mM. The upper picture refers to 0.5 h after the grounding; the lower picture refers to 1.5 h after the grounding.",
         "9": "Effect of ground-wiring on the AuNPs synthesized in presence of citrate; in both the panels closed dots refer to AuNPs synthesized via the Turkevitch chemical process while open dots refer to AuNPs synthesized by PLAL in citrate 2 mM. (Panel A) Absorbance spectra at time = 0 and after 8 h. (Panel B) f -potential as function of the grounding time.",
         "8": "Effect of ground-wiring on the AuNPs synthesized by PLAL in deionized water. (Panel A) Absorbance spectra at different times from the grounding. (Panel B) Ratio of the absorbances at 520 and 650 (black points left ordinate) and f -potential (red open circles, right ordinate) as function of the grounding time. (For interpretation of the references to color in this \ufb01gure legend, the reader is referred to the web version of this article.)"
+    },
+    "silver and gold nanoparticles produced by pulsed laser ablation in liquid to investigate their interaction with ubiquitin.pdf": {
+        "1": "SPR, absorbance and FWHM of the SPR band of AgNPs as a function time after laser ablation.",
+        "2": "SPR spectrum of AgNPs colloidal solution. In the inset, a TEM micrograph of AgNPs is shown. The determined size is indicated.",
+        "3": "SPR spectrum of AuNPs colloidal solution. The calculated size, extinction coef\ufb01cient, and molar concentrations are indicated.",
+        "5": "Temporal evolution of the absorbance of two SPR bands, \u0003 SPR peak1 and \u0003 SPR peak2, after incubation of bare AgNPs with Ubiquitin.",
+        "4": "Temporal evolution of the SPR spectrum (a) and \u0003 SPR peak2 (relative to the second SPR band) (b) after incubation of bare AgNPs with Ubiquitin.",
+        "6": "TEM micrographs of the AgNPs-Ubiquitin system without (a) and with (b) negative staining, taken after 24 h incubation of Ubiquitin with bare AgNPs, and (c) TEM micrograph with negative staining of the precipitate formed after 48 h incubation.",
+        "7": "SPR spectra of (a) AgNPs after addition of citrate and further incubation of \u201cAgNPs + citrate\u201d with Ubiquitin; (b) AgNPs after addition of phosphate and further incubation of \u201cAgNPs + phosphate\u201d with Ubiquitin. (c) SPR spectra of bare AgNPs incubated with Ubiquitin, stopped 81 min after mixing, and then treated with citrate. All the solutions were monitored at different times after mixing.",
+        "8": "Temporal evolution of the SPR spectrum (a) and \u0003 SPR peak2 (relative to the second SPR band) (b) after incubation of bare AuNPs with Ubiquitin.",
+        "9": "Temporal evolution of the absorbance of two SPR bands, \u0003 SPR peak1 and \u0003 SPR peak2, after the incubation of bare AuNPs with Ubiquitin.",
+        "10": "(a) Comparison of SPR spectra of AuNPs alone, AuNPs with Ub after 85 min incubation (AuNPs + Ub), AuNPs preincubated with TTR (3 \u0003 M) and then treated with Ub after 24 h incubation ([AuNPs + TTR] + Ub), AuNPs with the Ub mutant E16V after 24 h incubation (AuNPs + E16V). (b) Fluorescence microscopy image of AuNPs-Ub aggregates stained with ThT. The boxed area is enlarged in the inset to show the presence of \ufb01brillar structures of Ub molecules that underwent the amyloid transition."
     }
 }

@@ -2600,7 +2600,55 @@ class ArticlePDF:
             if len(block.text) == 0 or block.text.isspace():
                 continue
             result.append(block)
-        return self._join_tile_fragments(tuple(result))
+        return tuple(
+            self._join_word_lines(block)
+            for block in self._join_tile_fragments(tuple(result))
+        )
+
+    @classmethod
+    def _join_word_lines(cls, block: TextBlockPDF) -> TextBlockPDF:
+        """
+        Internal method to put back together the lines of a block drawn word by word.
+
+        Elsevier can draw every word on its own, behind a zero-size space, and
+        extraction then makes each word a line of its own. A block of running
+        text reads as a column of one-word lines — no block passes for prose,
+        no paragraph is found, and an equation beside a figure is taken in as
+        its labels. A line on the same row as the one before, starting exactly
+        where it ends, is joined to it: a table cell or the line of the other
+        column starts past a gap, and a fragment of a tiled page starts before
+        it.
+
+        Parameters
+        ----------
+        block : TextBlockPDF
+            Block to join the lines of.
+
+        Returns
+        -------
+        TextBlockPDF
+            The block with its words joined into lines, or the block itself
+            when none were split.
+        """
+
+        lines: list[TextLinePDF] = []
+        for line in block.lines:
+            if lines:
+                last = lines[-1]
+                if (
+                    last.dir[0] > 0.99
+                    and line.dir[0] > 0.99
+                    and line.rect.x0 >= last.rect.x1 - 1
+                    and cls._continues_line(last.rect, last.rect.x1, line.rect)
+                ):
+                    rect = Rect(last.rect)
+                    rect.include_rect(line.rect)
+                    lines[-1] = replace(last, rect=rect, spans=last.spans + line.spans)
+                    continue
+            lines.append(line)
+        if len(lines) == len(block.lines):
+            return block
+        return replace(block, lines=lines)
 
     def _join_tile_fragments(
         self, blocks: tuple[TextBlockPDF, ...]
@@ -3625,6 +3673,36 @@ class ArticlePDF:
                 core.include_rect(span.rect)
         return core
 
+    @staticmethod
+    def _continues_line(row: Rect, end: float, line: Rect) -> bool:
+        """
+        Internal method to tell whether a line continues a line of text.
+
+        A line split into blocks keeps its pieces on one row, each starting
+        where the one before ends; the line of the other column starts on the
+        same row past a gutter.
+
+        Parameters
+        ----------
+        row : Rect
+            Rectangle of the line continued, setting the row it lies on.
+        end : float
+            Right edge of the text so far on that row.
+        line : Rect
+            Rectangle of the candidate continuation.
+
+        Returns
+        -------
+        bool
+            True when `line` lies on the row and starts where the text so far
+            ends.
+        """
+
+        same_row = min(line.y1, row.y1) - max(line.y0, row.y0) > 0.5 * min(
+            line.height, row.height
+        )
+        return same_row and line.x0 <= end + 1 and line.x1 > end
+
     @classmethod
     def _cut_at_blank_line(cls, block: TextBlockPDF) -> tuple[TextBlockPDF, bool]:
         """
@@ -3708,6 +3786,20 @@ class ArticlePDF:
                 block = text_blocks[i]
                 text = block.text.strip()
                 match = pattern.match(text)
+                # The opening itself can be split into blocks: Elsevier sets
+                # `Fig.` in a block of its own and starts the next one with
+                # `10.` on the same line. The pieces are joined when the
+                # opening matches only across them.
+                if match is None and text and i + 1 < num_blocks:
+                    next_block = text_blocks[i + 1]
+                    last_line = block.lines[-1]
+                    if next_block.lines and self._continues_line(
+                        last_line.rect, last_line.rect.x1, next_block.lines[0].rect
+                    ) and pattern.match(f"{text} {next_block.lines[0].text.strip()}"):
+                        i += 1
+                        block = block + next_block
+                        text = block.text.strip()
+                        match = pattern.match(text)
                 if match:
                     # Some paragraphs can also begin with `pattern`, but in almost all cases
                     # font of `pattern` in figure caption is different from font of paragraph.
@@ -3772,16 +3864,8 @@ class ArticlePDF:
                             # added as a line of its own, which would break the
                             # caption's text and its line count at the tail.
                             line_so_far = block.lines[-1]
-                            same_line = min(
-                                next_line.rect.y1, last_rect.y1
-                            ) - max(next_line.rect.y0, last_rect.y0) > 0.5 * min(
-                                next_line.rect.height, last_rect.height
-                            )
-                            if (
-                                same_line
-                                and next_line.rect.x0
-                                <= line_so_far.rect.x1 + vertical_thr
-                                and next_line.rect.x1 > line_so_far.rect.x1
+                            if self._continues_line(
+                                last_rect, line_so_far.rect.x1, next_line.rect
                             ):
                                 line_rect = Rect(line_so_far.rect)
                                 line_rect.include_rect(next_line.rect)
