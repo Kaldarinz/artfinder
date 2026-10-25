@@ -236,3 +236,12 @@ class TestPublisherCountry:
         assert journal is not None
         assert journal.publisher == "Elsevier B.V."
         assert journal.country == "Netherlands"
+
+    def test_publisher_names_are_unescaped(self) -> None:
+        """A name the CSV escapes as HTML arrives unescaped, map key included."""
+        scimago = SciMagoJR("latest")
+        journal = scimago.get_journal(title="Advanced Optical Materials")
+        assert journal is not None
+        assert journal.publisher == "John Wiley & Sons Inc."
+        assert "John Wiley & Sons Inc." in scimago.publisher_countries
+        assert "John Wiley &amp; Sons Inc." not in scimago.publisher_countries

@@ -5,6 +5,7 @@
 Classes for handling SciMagoJR data.
 """
 
+import html
 import logging
 import re
 from pathlib import Path
@@ -32,6 +33,12 @@ class SciMagoJR:
             raise NotImplementedError(
                 "Only 'latest' ranking year is supported currently."
             )
+        # The CSV escapes some publisher names as HTML ("John Wiley &amp; Sons
+        # Inc."). Unescape them once, so the country map's keys and the name
+        # get_journal returns agree.
+        self.all_data["Publisher"] = self.all_data["Publisher"].map(
+            lambda name: html.unescape(name) if isinstance(name, str) else name
+        )
         self.publisher_countries = self.publisher_country_map(self.all_data)
 
     @staticmethod
