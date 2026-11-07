@@ -43,7 +43,7 @@ class TestFigureCaptions:
         first_pdf = next(iter(expected_captions.keys()))
         assert isinstance(expected_captions[first_pdf], dict)
 
-    def test_figure_captions_keys_are_labels(self, pdf_files):
+    def test_figure_captions_keys_are_labels(self, pdf_files: list[Path]) -> None:
         """Test that figure_captions keys are figure labels."""
         if not pdf_files:
             pytest.skip("No PDF files found in test directory")
@@ -54,8 +54,8 @@ class TestFigureCaptions:
         for key in captions.keys():
             assert isinstance(key, str), f"Expected str key, got {type(key)}"
             assert re.fullmatch(
-                r"S?\d+", key
-            ), f"Expected a figure label like '1' or 'S1', got {key!r}"
+                r"[A-Z]?\d+(?:\.\d+)*", key
+            ), f"Expected a figure label like '1', 'S1' or 'A2.1', got {key!r}"
 
         article.close()
 

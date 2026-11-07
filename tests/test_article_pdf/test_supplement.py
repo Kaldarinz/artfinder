@@ -19,6 +19,9 @@ UNDETECTED = {
     # Opens directly on "Table S1. Humoral factors …", with no heading at all.
     "silicon-gold nanoparticles affect wharton's jelly phenotype and secretome"
     " during tri-lineage differentiation_si.pdf",
+    # Headed "ADDITIONAL INFORMATION", outside the supplement-heading grammar.
+    "optical and electron microscopic study of laser-based intracellular molecule"
+    " delivery using peptide-conjugated gold nanoparticles_si.pdf",
 }
 "Supplements neither clause catches, documented as such."
 

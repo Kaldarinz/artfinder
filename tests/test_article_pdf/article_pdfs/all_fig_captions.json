@@ -1,4 +1,19 @@
 {
+    "optical and electron microscopic study of laser-based intracellular molecule delivery using peptide-conjugated gold nanoparticles_si.pdf": {
+        "A2.1": "Ligand-free AuNPs have a hydrodynamic particle diameter of (5.0 \u00b1 0.6) nm when determining the size distribution using an analytic disc centrifuge (ADC). In DLS and TEM the measured diameters are slightly larger.",
+        "A2.2": "After agglomeration CWR 10 -AuNP agglomerates have a hydrodynamic particle diameter (Volume Frequency) of (44 \u00b1 37) nm.",
+        "A2.3": "Comparison of the surface plasmon resonance peak of ligand-free AuNPs and the agglomerates. CWR 10 -AuNP agglomerates show a shift of 20 nm, NLS-AuNP agglomerates a shift of 40 nm. The peak broadens for the agglomerates and thus, the shift is larger for longer wavelengths.",
+        "A2.4": "The zeta potential of the CWR 10 -AuNP agglomerates is (+ 25.9 \u00b1 5.0) mV compared to (+ 18.7 \u00b1 14.9) mV for NLS-AuNP agglomerates.",
+        "A3.1": "ZMTH3 with intraendosomal NLS-AuNP agglomerates after irradiation with 25 mJ/cm 2. All scale bars: 200 nm.",
+        "A3.2": "ZMTH3 with intraendosomal NLS-AuNP agglomerates after irradiation with 35 mJ/cm 2. All scale bars: 200 nm.",
+        "A4.1": "Exemplary TEM image of a BSA-sheath after irradiation with 35 mJ/cm 2 in the shape of an agglomerate with leftover particles only. Scale bar: 100 nm.",
+        "A4.2": "Exemplary TEM images of a) non-CPP-AuNPs and b) CPP-AuNP irradiated 35 mJ/cm 2. Scale bars: a) 100 nm, b) 200 nm.",
+        "A4.3": "Exemplary TEM image of a cell incubated for 4 h with non-CPP-AuNPs. Only sporadically individual AuNPs can be found inside the cell (red circle). Scale bar: 500 nm.",
+        "A5.1": "Two di\ufb00erent \ufb01elds of view evaluated before (a, c) and the according images after irradiation with 25 mJ/cm 2 (b, d). Yellow circled: cells successfully released calcein. Red circled: no successful release. All scale bars: 50 \u00b5 m.",
+        "A5.2": "Two di\ufb00erent \ufb01elds of view evaluated before (a, c) and the according images after irradiation with 35 mJ/cm 2 (b, d). Yellow circled: cells successfully released calcein. Red circled: no successful release. All scale bars: 50 \u00b5 m.",
+        "A5.3": "Percentage of \ufb02uorescent area of 1474 cells (for all parameters) after the treatment against the ratio of their \ufb02uorescent area after and before irradiation (logarithmic representation). Blue diamonds indicate cells that showed an e\ufb03cient molecule release into the cytoplasm by eye. Pink diamonds represent cells we could not detect the release by eye. The black lines display the best possible criteria to choose cells with successful molecule release using ImageJ (upper right quadrant).",
+        "A6": "Viability of cells about ten minutes after the laser treatment. Stained with calcein AM (viable cells) and Propidium Iodide (dead cells). Counted automatically with the Cellometer. Dual (calcein AM and PI) \ufb02uorescing cells were accounted as dead. Non \ufb02uorescing, counted cells were subtracted from the total amount of cells as they were no cells but rather debris. More than 3000 cells were evaluated for all parameters (n \u2265 4). No signi\ufb01cant decrease for higher radiant exposures."
+    },
     "laser-ablation synthesis of colloidal zrn nanoparticles in different liquids.pdf": {
         "1": "Optical properties of ZrN NPs: (a) photographs of solutions (from left to right: acetonitrile, acetone, ethanol, isopropanol, DMF, and water); and (b) extinction spectra.",
         "2": "Size distributions and images of ZrN NPs synthesized in (a) acetonitrile, (b) acetone, (c) ethanol, (d) isopropanol, (e) DMF, and (f) water.",

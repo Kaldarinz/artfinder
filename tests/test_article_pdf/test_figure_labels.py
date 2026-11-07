@@ -21,6 +21,25 @@ SUPPLEMENTARY_PDF = (
 LINE_NUMBERED_PDF = (
     TEST_PDFS_DIR / "tunable nanostructuring for van der waals materials_si.pdf"
 )
+APPENDIX_PDF = (
+    TEST_PDFS_DIR
+    / "optical and electron microscopic study of laser-based intracellular molecule delivery using peptide-conjugated gold nanoparticles_si.pdf"
+)
+APPENDIX_LABELS = {
+    "A2.1",
+    "A2.2",
+    "A2.3",
+    "A2.4",
+    "A3.1",
+    "A3.2",
+    "A4.1",
+    "A4.2",
+    "A4.3",
+    "A5.1",
+    "A5.2",
+    "A5.3",
+    "A6",
+}
 
 
 def _numbered_line(page_no: int) -> TextLinePDF:
@@ -51,6 +70,9 @@ class TestCaptionLabel:
             ("Supporting Figure 2. Photographs of solutions.", "S2"),
             ("Figure 1S. (a) Dynamics of conjugation.", "S1"),
             ("Fig. 12S: Size distributions.", "S12"),
+            ("Supplementary Figure 2.1. Spectra.", "S2.1"),
+            ("Supplementary Figure A2.1. Spectra.", "A2.1"),
+            ("Supplementary Fig. b02.01. Spectra.", "B2.1"),
         ],
     )
     def test_label_of_caption(self, caption: str, expected: str) -> None:
@@ -61,11 +83,60 @@ class TestCaptionLabel:
         assert ArticlePDF._caption_label(match) == expected
 
     @pytest.mark.parametrize(
+        ("opening", "pattern"),
+        [
+            ("Figure", ArticlePDF.CAPTION_PATTERN),
+            ("Table", ArticlePDF.TABLE_CAPTION_PATTERN),
+        ],
+    )
+    @pytest.mark.parametrize(
+        ("label", "expected"),
+        [
+            ("A2.1", "A2.1"),
+            ("A2.2", "A2.2"),
+            ("B2.1", "B2.1"),
+            ("A6", "A6"),
+            ("C 12.3.4", "C12.3.4"),
+            ("a02.01", "A2.1"),
+            ("2.1", "2.1"),
+            ("02.01.003", "2.1.3"),
+            ("S2.1", "S2.1"),
+            ("2.1S", "S2.1"),
+        ],
+    )
+    def test_hierarchical_labels(
+        self, opening: str, pattern: re.Pattern[str], label: str, expected: str
+    ) -> None:
+        """Preserve appendix letters and every component for figures and tables."""
+
+        caption = f"{opening} {label}: (a) Measurements."
+        match = pattern.match(caption)
+        assert match is not None
+        assert ArticlePDF._caption_label(match) == expected
+        assert caption[match.end() :] == "(a) Measurements."
+
+    @pytest.mark.parametrize(
+        "pattern", [ArticlePDF.CAPTION_PATTERN, ArticlePDF.TABLE_CAPTION_PATTERN]
+    )
+    @pytest.mark.parametrize(
+        "label", ["1a", "1.2a", "A2.1a", "A2.1.3b", "A2.1_", "A2.1.3Sx"]
+    )
+    def test_panel_references_are_not_partially_matched(
+        self, pattern: re.Pattern[str], label: str
+    ) -> None:
+        """Do not backtrack to a shorter number when a panel follows the label."""
+
+        opening = "Table" if pattern is ArticlePDF.TABLE_CAPTION_PATTERN else "Figure"
+        assert pattern.match(f"{opening} {label} shows the result.") is None
+
+    @pytest.mark.parametrize(
         ("caption", "expected"),
         [
             ("Figure 1. (a) Setup; (b) spectra.", "(a) Setup; (b) spectra."),
             ("Figure 1S. (a) Dynamics.", "(a) Dynamics."),
             ("Fig. 2 [Reprinted from ref. 5]", "[Reprinted from ref. 5]"),
+            ("Figure A2.1. (a) Setup; (b) spectra.", "(a) Setup; (b) spectra."),
+            ("Figure A2.1: 10 particles.", "10 particles."),
         ],
     )
     def test_opening_bracket_is_kept(self, caption: str, expected: str) -> None:
@@ -113,6 +184,32 @@ class TestSupplementaryFigures:
         for label, path in paths.items():
             assert path.exists(), f"Figure {label} was not written to {path}"
             assert path.name.endswith(f"_fig_{label}.png"), path.name
+
+
+class TestAppendixFigures:
+    """Appendix labels survive caption detection, matching and PNG extraction."""
+
+    def test_all_appendix_figures_found(self) -> None:
+        """The real supplement contains thirteen distinct appendix figures."""
+
+        with ArticlePDF(APPENDIX_PDF) as article:
+            assert set(article.figures) == APPENDIX_LABELS
+            assert set(article.figure_captions) == APPENDIX_LABELS
+            for figure in article.figures.values():
+                assert not figure.rect.is_empty
+                assert figure.rect.y1 <= figure.caption.rect.y0
+
+    def test_appendix_filenames(self, tmp_path: Path) -> None:
+        """Hierarchical labels remain intact in returned keys and file names."""
+
+        with ArticlePDF(APPENDIX_PDF, identifier="appendix") as article:
+            paths = article.extract_figures(
+                output_path=tmp_path, figure_label="A2.1", dpi=72
+            )
+
+        assert set(paths) == {"A2.1"}
+        assert paths["A2.1"].name == "appendix_fig_A2.1.png"
+        assert paths["A2.1"].is_file()
 
 
 class TestLineNumbers:

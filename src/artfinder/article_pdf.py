@@ -5,9 +5,9 @@ This module provides a comprehensive class for analyzing scientific articles in 
 extracting figures, captions, and analyzing document structure.
 
 A figure is identified by its caption label rather than by a number: `"1"` for
-`Figure 1`, `"S1"` for `Figure S1`, `Fig. S1` or `Supplementary Figure 1`. This
-keeps main-text and supplementary figures apart in a document that contains
-both, such as a preprint with its supplementary information appended.
+`Figure 1`, `"S1"` for `Figure S1`, `Fig. S1` or `Supplementary Figure 1`,
+and `"A2.1"` for `Figure A2.1`. Letter prefixes and dotted numbers are preserved,
+keeping main-text, supplementary and appendix figures distinct.
 """
 
 import html
@@ -71,8 +71,10 @@ class ArticlePDF:
     structure (columns, paragraphs), and identifying document headers.
 
     Figures are composed of vector graphics (drawings) and raster images and text elements.
-    Every figure is keyed by its label — the figure number as written in the
-    caption, prefixed with `S` for a supplementary figure, e.g. `1` or `S1`.
+    Every figure is keyed by its label, e.g. `1`, `S1`, `A6` or `A2.1`.
+    Letter prefixes are uppercased, dotted numeric components are preserved,
+    and leading zeros are dropped. Supplementary words or a trailing `S`
+    supply an `S` prefix when the caption has no explicit letter prefix.
 
     Known limitations
     -----------------
@@ -164,23 +166,30 @@ class ArticlePDF:
     WHITE_LEVEL = 0.97
     """Lowest value every component of a colour must reach for it to be taken
     as white, which leaves a drawing painted in it invisible on the page."""
+    _CAPTION_LABEL_PATTERN = (
+        r"(?:(?P<prefix>[A-Z])\s?)?(?P<number>\d+(?:\.\d+)*)"
+        r"(?P<suffix>S)?(?!\w|\.\d)[^\w(\[]*"
+    )
+    """Shared label grammar: an optional letter and dot-separated numbers.
+    The boundary also prevents backtracking to a shorter label in `A2.1a`."""
     CAPTION_PATTERN = re.compile(
         r"^\s*(?:(?P<supp>supplementary|supplemental|supporting)\s+)?"
-        r"Fig(?:\.|ure\.?|)\s+(?:(?P<prefix>S)\s?)?(?P<number>\d+)(?P<suffix>S)?(?!\w)[^\w(\[]*",
+        rf"Fig(?:\.|ure\.?|)\s+{_CAPTION_LABEL_PATTERN}",
         re.IGNORECASE,
     )
     """Pattern of a figure caption opening, e.g. `Fig. 1`, `Figure S2.`,
-    `Figure 2S.` or `Supplementary Figure 3`. The `supp`, `prefix` and `suffix`
-    groups mark a supplementary figure, the `number` group holds its digits.
-    A label run into a letter is not an opening: `Figure 1a shows` starts a
-    paragraph referring to a panel, set in the same font as a caption."""
+    `Figure 2S.`, `Supplementary Figure 3` or `Figure A2.1`.
+    The `prefix` group holds an appendix or supplementary letter, `number`
+    holds the numeric components, and `supp` and `suffix` mark supplementary
+    figures. A label run into a letter is not an opening: `Figure 1a shows`
+    starts a paragraph referring to a panel, set in the same font as a caption."""
     TABLE_CAPTION_PATTERN = re.compile(
         r"^\s*(?:(?P<supp>supplementary|supplemental|supporting)\s+)?"
-        r"Table\s+(?:(?P<prefix>S)\s?)?(?P<number>\d+)(?P<suffix>S)?(?!\w)[^\w(\[]*",
+        rf"Table\s+{_CAPTION_LABEL_PATTERN}",
         re.IGNORECASE,
     )
-    """Pattern of a table caption opening, e.g. `Table 1.` or `Table S2.`, with
-    the groups of `CAPTION_PATTERN`."""
+    """Pattern of a table caption opening, e.g. `Table 1.`, `Table S2.` or
+    `Table B1.2`, with the groups of `CAPTION_PATTERN`."""
     MAX_CAPTION_DISTANCE = 1.5
     """How far from its caption a table body may start, and how far its blocks
     may follow each other, in line pitches."""
@@ -3387,10 +3396,11 @@ class ArticlePDF:
         """
         Build a figure label from a `CAPTION_PATTERN` match.
 
-        The label is the figure number with leading zeros dropped, prefixed with
-        `S` for a supplementary figure. Both spellings of "supplementary" mark
-        the same thing, so `Supplementary Fig. S1` is labelled `S1`, not `SS1`,
-        and `Figure 1S` — the `S` set after the number — is labelled `S1` too.
+        Each numeric component loses its leading zeros, and an explicit letter
+        prefix is uppercased and preserved. Without one, a supplementary word
+        or trailing `S` supplies the prefix `S`: `Supplementary Fig. S1` and
+        `Figure 1S` both become `S1`. Appendix labels such as `A2.1` stay distinct
+        from `A2.2`, `B2.1` and ordinary figure `2.1`.
 
         Parameters
         ----------
@@ -3400,14 +3410,14 @@ class ArticlePDF:
         Returns
         -------
         str
-            Figure label, e.g. `1` or `S1`.
+            Figure label, e.g. `1`, `S1` or `A2.1`.
         """
 
-        supplementary = (
-            match.group("supp") or match.group("prefix") or match.group("suffix")
-        )
-        prefix = "S" if supplementary else ""
-        return f"{prefix}{int(match.group('number'))}"
+        prefix = (match.group("prefix") or "").upper()
+        if not prefix and (match.group("supp") or match.group("suffix")):
+            prefix = "S"
+        number = ".".join(str(int(part)) for part in match.group("number").split("."))
+        return f"{prefix}{number}"
 
     @staticmethod
     def _normalize_caption_whitespace(text: str) -> str:
