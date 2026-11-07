@@ -146,6 +146,10 @@ class ArticlePDF:
     MAX_FIGURE_PANEL_GAP = 40.0
     """Widest blank space, in points, across which a figure takes in a cluster
     of graphics no caption claimed — a panel set apart from the others."""
+    MAX_FIGURE_PANEL_GAP_RATIO = 0.5
+    """Widest horizontal gap between aligned panels, as a fraction of the
+    narrower panel's width. Supplements the absolute gap for large panels on
+    the same side of their caption, without joining distant small graphics."""
     CAPTION_ABOVE_FIGURE_WEIGHT = 1.5
     """Factor on the distance from a caption to a figure below it: a caption
     sits under its figure more often than over it."""
@@ -4908,6 +4912,43 @@ class ArticlePDF:
                 return True
         return False
 
+    def _within_figure_panel_gap(self, rect: Rect, other: Rect, caption: Rect) -> bool:
+        """Tell whether two panels are close enough to belong to one figure.
+
+        The absolute gap handles panels in any arrangement. Large plots in
+        one row can be spaced further apart: allow up to half the narrower
+        panel's width when they share most of the shorter panel's height and
+        both sit above or both below the caption. Text and other figures are
+        checked separately by the caller.
+
+        Parameters
+        ----------
+        rect : Rect
+            Bounds of the figure so far.
+        other : Rect
+            Bounds of an unclaimed graphics cluster.
+        caption : Rect
+            Caption of the figure.
+
+        Returns
+        -------
+        bool
+            Whether the absolute or scale-aware spacing limit is met.
+        """
+        gap = self._gap_between(rect, other)
+        if gap <= self.MAX_FIGURE_PANEL_GAP:
+            return True
+        shared_height = min(rect.y1, other.y1) - max(rect.y0, other.y0)
+        same_side = (
+            max(rect.y1, other.y1) <= caption.y0 + self.MAX_CAPTION_FIGURE_OVERLAP
+            or min(rect.y0, other.y0) >= caption.y1 - self.MAX_CAPTION_FIGURE_OVERLAP
+        )
+        return (
+            same_side
+            and shared_height > 0.5 * min(rect.height, other.height)
+            and gap <= self.MAX_FIGURE_PANEL_GAP_RATIO * min(rect.width, other.width)
+        )
+
     def _match_figures_on_page(self, page_no: int) -> dict[int, Rect]:
         """
         Internal method to pair the figure captions of a page with its graphics.
@@ -4920,8 +4961,9 @@ class ArticlePDF:
         figures lies nearer to the figure it does not belong to often enough —
         the next figure starts right under it — and taking the nearest would
         leave the other caption with none. Each figure then takes in the clusters no
-        caption claimed that lie within `MAX_FIGURE_PANEL_GAP` of it, provided it
-        covers no text, other figure or page furniture in doing so — the panels
+        caption claimed that lie within the absolute or scale-aware panel gap
+        (see `_within_figure_panel_gap`), provided it covers no text, other
+        figure or page furniture in doing so — the panels
         of a figure set further apart than `FIGURE_GRAPHICS_GAP`. A caption
         whose figure sits at the foot of the previous page takes part in
         neither.
@@ -4989,7 +5031,9 @@ class ArticlePDF:
                 nearest: tuple[float, int] | None = None
                 for caption_index, figure in figures.items():
                     gap = self._gap_between(figure.reach, cluster.reach)
-                    if gap > self.MAX_FIGURE_PANEL_GAP:
+                    if not self._within_figure_panel_gap(
+                        figure.reach, cluster.reach, captions[caption_index].rect
+                    ):
                         continue
                     span = self._span(figure.reach, cluster.reach)
                     if any(
