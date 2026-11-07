@@ -58,6 +58,10 @@ class TestCaptionLabel:
         [
             ("Figure 1. Sketch of the setup.", "1"),
             ("Fig. 1 Sketch of the setup.", "1"),
+            ("Fig.1 Sketch of the setup.", "1"),
+            ("Fig.S12: Size distributions.", "S12"),
+            ("Figure.S2. Extinction spectra.", "S2"),
+            ("Supplementary Fig.b02.01. Spectra.", "B2.1"),
             ("Fig 1 Sketch of the setup.", "1"),
             ("Figure S1. Extinction spectra.", "S1"),
             ("Fig. S12: Size distributions.", "S12"),
@@ -150,6 +154,11 @@ class TestCaptionLabel:
         "text",
         [
             "Figures 1 and 2 show the setup.",
+            "FigS1 shows the setup.",
+            "FigureS1 shows the setup.",
+            "Fig.S1a shows a panel.",
+            "Fig.A2.1a shows a panel.",
+            "Fig.SI1 is not supported yet.",
             "Fig. SI1 is not supported yet.",
             "Figure S-1 is not supported yet.",
             "Figure IV is not supported yet.",

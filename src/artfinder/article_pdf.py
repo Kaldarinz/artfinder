@@ -174,11 +174,13 @@ class ArticlePDF:
     The boundary also prevents backtracking to a shorter label in `A2.1a`."""
     CAPTION_PATTERN = re.compile(
         r"^\s*(?:(?P<supp>supplementary|supplemental|supporting)\s+)?"
-        rf"Fig(?:\.|ure\.?|)\s+{_CAPTION_LABEL_PATTERN}",
+        rf"Fig(?:ure)?(?:\.\s*|\s+){_CAPTION_LABEL_PATTERN}",
         re.IGNORECASE,
     )
     """Pattern of a figure caption opening, e.g. `Fig. 1`, `Figure S2.`,
     `Figure 2S.`, `Supplementary Figure 3` or `Figure A2.1`.
+    A period separates the opening from its label even without a space
+    (`Fig.S1`, `Fig.1`); undotted `Fig` and `Figure` require whitespace.
     The `prefix` group holds an appendix or supplementary letter, `number`
     holds the numeric components, and `supp` and `suffix` mark supplementary
     figures. A label run into a letter is not an opening: `Figure 1a shows`
