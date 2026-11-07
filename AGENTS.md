@@ -10,22 +10,28 @@ Packaging: hatchling, `src/` layout, `requires-python >= 3.10`. Version lives in
 
 ## Environment & commands
 
-`venv/` at the repo root is the working environment (Python 3.12) with `artfinder` installed editable **from the main checkout**. **Neither `pytest` nor `hatch` is installed there** — install before running tests or type checks:
+`venv/` at the repo root is the working environment (Python 3.12) with `artfinder` installed editable **from the main checkout**. Install test tooling before running tests (`hatch` is separate):
 
 ```bash
-venv/bin/pip install pytest
+venv/bin/pip install pytest pytest-xdist threadpoolctl
 ```
 
-Run the tests:
+Test dependencies are declared in the `test` extra in `pyproject.toml`.
+
+Run the tests (eight worker processes by default, with one BLAS/OpenMP thread per worker):
 
 ```bash
 venv/bin/python -m pytest tests
 ```
 
+Golden caption and rectangle tests are parameterized per PDF so all eight workers
+can share the expensive corpus checks. Keep the parameter order deterministic.
+Use `-n 0` for serial execution/debugging, or `-n 4` to reduce concurrency.
+
 Single test file / single test:
 
 ```bash
-venv/bin/python -m pytest tests/test_article_pdf/test_figure_captions.py -k test_figure_captions_keys_are_labels
+venv/bin/python -m pytest -n 0 tests/test_article_pdf/test_figure_captions.py -k test_figure_captions_keys_are_labels
 ```
 
 Type check (defined as a hatch env in `pyproject.toml`; needs `hatch`, or run `mypy` directly against the same targets after `venv/bin/pip install mypy pandas-stubs types-requests`):

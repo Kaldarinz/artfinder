@@ -31,6 +31,13 @@ dependencies = [
   "pyiso4",
 ]
 
+[project.optional-dependencies]
+test = [
+  "pytest>=7",
+  "pytest-xdist>=3.5",
+  "threadpoolctl>=3.1",
+]
+
 [project.urls]
 Documentation = "https://github.com/Kaldarinz/artfinder#readme"
 Issues = "https://github.com/Kaldarinz/artfinder/issues"
@@ -58,7 +65,8 @@ tests = ["tests", "*/artfinder/tests"]
 exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
 
 [tool.pytest.ini_options]
-addopts = ["--import-mode=importlib"]
+# Separate processes are safe for PyMuPDF; work stealing balances slow PDF cases.
+addopts = ["--import-mode=importlib", "-n", "8", "--dist=worksteal"]
 # Test the checkout pytest was started from, not the one the venv is installed from.
 # Relative to rootdir, so each worktree tests its own source. See docs/test_setup.md.
 pythonpath = ["src"]

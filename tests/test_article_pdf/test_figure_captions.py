@@ -1,46 +1,59 @@
-"""
-Tests for ArticlePDF figure captions extraction.
-"""
+"""Tests for ArticlePDF figure captions extraction."""
 
 import json
 import re
-import pytest
 from pathlib import Path
+
+import pytest
+
 from artfinder.article_pdf import ArticlePDF
 
 
-# Get the test PDFs directory
 TEST_PDFS_DIR = Path(__file__).parent / "article_pdfs"
 CAPTIONS_JSON = TEST_PDFS_DIR / "all_fig_captions.json"
+EXPECTED_CAPTIONS: dict[str, dict[str, str]] = json.loads(
+    CAPTIONS_JSON.read_text(encoding="utf-8")
+)
 
 
 @pytest.fixture
-def expected_captions():
-    """Load expected figure captions from JSON file."""
-    with open(CAPTIONS_JSON, "r") as f:
-        return json.load(f)
+def expected_captions() -> dict[str, dict[str, str]]:
+    """Return the golden captions.
+
+    Returns
+    -------
+    dict[str, dict[str, str]]
+        Caption text by PDF name and figure label.
+    """
+    return EXPECTED_CAPTIONS
 
 
 @pytest.fixture
-def pdf_files():
-    """Return list of all test PDF files."""
-    return list(TEST_PDFS_DIR.glob("*.pdf"))
+def pdf_files() -> list[Path]:
+    """Return the test PDF paths in deterministic order.
+
+    Returns
+    -------
+    list[Path]
+        PDFs in the golden corpus.
+    """
+    return sorted(TEST_PDFS_DIR.glob("*.pdf"))
 
 
 class TestFigureCaptions:
     """Tests for figure captions extraction from PDF files."""
 
-    def test_captions_json_exists(self):
+    def test_captions_json_exists(self) -> None:
         """Test that the captions JSON file exists."""
         assert CAPTIONS_JSON.exists(), f"Captions file not found: {CAPTIONS_JSON}"
 
-    def test_captions_json_format(self, expected_captions):
+    def test_captions_json_format(
+        self, expected_captions: dict[str, dict[str, str]]
+    ) -> None:
         """Test that captions JSON has correct format."""
         assert isinstance(expected_captions, dict)
         assert len(expected_captions) > 0
-
-        # Check structure of first entry
-        first_pdf = next(iter(expected_captions.keys()))
+        first_pdf = next(iter(expected_captions))
         assert isinstance(expected_captions[first_pdf], dict)
 
     def test_figure_captions_keys_are_labels(self, pdf_files: list[Path]) -> None:
@@ -48,112 +61,43 @@ class TestFigureCaptions:
         if not pdf_files:
             pytest.skip("No PDF files found in test directory")
 
-        article = ArticlePDF(pdf_files[0])
-        captions = article.figure_captions
+        with ArticlePDF(pdf_files[0]) as article:
+            for key in article.figure_captions:
+                assert isinstance(key, str), f"Expected str key, got {type(key)}"
+                assert re.fullmatch(
+                    r"[A-Z]?\d+(?:\.\d+)*", key
+                ), f"Expected a figure label like '1', 'S1' or 'A2.1', got {key!r}"
 
-        for key in captions.keys():
-            assert isinstance(key, str), f"Expected str key, got {type(key)}"
-            assert re.fullmatch(
-                r"[A-Z]?\d+(?:\.\d+)*", key
-            ), f"Expected a figure label like '1', 'S1' or 'A2.1', got {key!r}"
-
-        article.close()
-
-    def test_figure_captions_values_are_strings(self, pdf_files):
+    def test_figure_captions_values_are_strings(self, pdf_files: list[Path]) -> None:
         """Test that figure_captions values are strings."""
         if not pdf_files:
             pytest.skip("No PDF files found in test directory")
 
-        article = ArticlePDF(pdf_files[0])
-        captions = article.figure_captions
+        with ArticlePDF(pdf_files[0]) as article:
+            for value in article.figure_captions.values():
+                assert isinstance(value, str), f"Expected str value, got {type(value)}"
 
-        for value in captions.values():
-            assert isinstance(value, str), f"Expected str value, got {type(value)}"
-
-        article.close()
-
-    def test_figure_captions_consistency(self, pdf_files):
+    def test_figure_captions_consistency(self, pdf_files: list[Path]) -> None:
         """Test that multiple calls to figure_captions return consistent results."""
         if not pdf_files:
             pytest.skip("No PDF files found in test directory")
 
         with ArticlePDF(pdf_files[0]) as article:
-
             captions1 = article.figure_captions
             captions2 = article.figure_captions
-
-            assert (
-                captions1 == captions2
-            ), "Multiple calls to figure_captions should return same results"
+            assert captions1 == captions2
             assert captions1 is captions2, "figure_captions should be cached"
 
-    def test_empty_pdf_captions(self):
-        """Test behavior with PDFs that have no figures."""
-        # This test would require a PDF without figures
-        # For now, we just verify the property doesn't crash
+    def test_empty_pdf_captions(self) -> None:
+        """Placeholder for a PDF without figures."""
         pass
 
-    def test_all_pdfs_caption_extraction(self, expected_captions):
-        """Test caption extraction for all PDFs in the test directory."""
-        results = []
-
-        for pdf_name, expected in expected_captions.items():
-            pdf_path = TEST_PDFS_DIR / pdf_name
-
-            if not pdf_path.exists():
-                results.append((pdf_name, "SKIP", "File not found"))
-                continue
-
-            try:
-                with ArticlePDF(pdf_path) as article:
-                    captions = article.figure_captions
-
-                    # Check caption count
-                    if len(captions) != len(expected):
-                        results.append(
-                            (
-                                pdf_name,
-                                "FAIL",
-                                f"Count mismatch: expected {len(expected)}, got {len(captions)}",
-                            )
-                        )
-                        continue
-
-                    # Check caption labels
-                    expected_labels = set(expected.keys())
-                    actual_labels = set(captions.keys())
-                    if actual_labels != expected_labels:
-                        results.append(
-                            (
-                                pdf_name,
-                                "FAIL",
-                                f"Figure labels mismatch: expected {expected_labels}, got {actual_labels}",
-                            )
-                        )
-                        continue
-
-                    # Check caption text
-                    all_match = True
-                    for fig_label, expected_text in expected.items():
-                        if captions[fig_label] != expected_text:
-                            all_match = False
-                            break
-
-                    if all_match:
-                        results.append((pdf_name, "PASS", ""))
-                    else:
-                        results.append((pdf_name, "FAIL", "Caption text mismatch"))
-
-            except Exception as e:
-                results.append((pdf_name, "ERROR", str(e)))
-
-        # Report results
-        failed = [r for r in results if r[1] in ["FAIL", "ERROR"]]
-
-        if failed:
-            fail_msg = "\n".join(
-                [f"{name}: {status} - {msg}" for name, status, msg in failed]
-            )
-            pytest.fail(
-                f"Caption extraction failed for {len(failed)}/{len(expected_captions)} PDFs:\n{fail_msg}"
-            )
+    @pytest.mark.parametrize("pdf_name", sorted(EXPECTED_CAPTIONS))
+    def test_all_pdfs_caption_extraction(
+        self, pdf_name: str, expected_captions: dict[str, dict[str, str]]
+    ) -> None:
+        """Compare every label and full caption, scheduling each PDF separately."""
+        pdf_path = TEST_PDFS_DIR / pdf_name
+        assert pdf_path.is_file(), f"Golden PDF not found: {pdf_path}"
+        with ArticlePDF(pdf_path) as article:
+            assert article.figure_captions == expected_captions[pdf_name]

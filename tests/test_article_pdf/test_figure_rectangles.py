@@ -15,29 +15,45 @@ from artfinder.article_pdf import ArticlePDF
 # Get the test PDFs directory
 TEST_PDFS_DIR = Path(__file__).parent / "article_pdfs"
 RECTANGLES_JSON = TEST_PDFS_DIR / "figure_rects.json"
+EXPECTED_RECTANGLES: dict[str, dict[str, list[float]]] = json.loads(
+    RECTANGLES_JSON.read_text(encoding="utf-8")
+)
 
 
 @pytest.fixture
-def expected_rectangles():
-    """Load expected figure rectangles from JSON file."""
-    with open(RECTANGLES_JSON, "r") as f:
-        return json.load(f)
+def expected_rectangles() -> dict[str, dict[str, list[float]]]:
+    """Return the golden rectangles.
+
+    Returns
+    -------
+    dict[str, dict[str, list[float]]]
+        Rectangle coordinates by PDF name and figure label.
+    """
+    return EXPECTED_RECTANGLES
 
 
 @pytest.fixture
-def pdf_files():
-    """Return list of all test PDF files."""
-    return list(TEST_PDFS_DIR.glob("*.pdf"))
+def pdf_files() -> list[Path]:
+    """Return the test PDF paths in deterministic order.
+
+    Returns
+    -------
+    list[Path]
+        PDFs in the golden corpus.
+    """
+    return sorted(TEST_PDFS_DIR.glob("*.pdf"))
 
 
 class TestFigureRectangles:
     """Tests for figure rectangle extraction from PDF files."""
 
-    def test_rectangles_json_exists(self):
+    def test_rectangles_json_exists(self) -> None:
         """Test that the rectangles JSON file exists."""
         assert RECTANGLES_JSON.exists(), f"Rectangles file not found: {RECTANGLES_JSON}"
 
-    def test_rectangles_json_format(self, expected_rectangles):
+    def test_rectangles_json_format(
+        self, expected_rectangles: dict[str, dict[str, list[float]]]
+    ) -> None:
         """Test that rectangles JSON has correct format."""
         assert isinstance(expected_rectangles, dict)
         assert len(expected_rectangles) > 0
@@ -46,7 +62,7 @@ class TestFigureRectangles:
         first_pdf = next(iter(expected_rectangles.keys()))
         assert isinstance(expected_rectangles[first_pdf], dict)
 
-    def test_figure_rectangles_consistency(self, pdf_files):
+    def test_figure_rectangles_consistency(self, pdf_files: list[Path]) -> None:
         """Test that multiple calls to figures return consistent rectangles."""
         if not pdf_files:
             pytest.skip("No PDF files found in test directory")
@@ -60,80 +76,21 @@ class TestFigureRectangles:
             ), "Multiple calls to figures should return same results"
             assert figures1 is figures2, "figures should be cached"
 
-    def test_all_pdfs_rectangle_extraction(self, expected_rectangles):
-        """Test rectangle extraction for all PDFs in the test directory."""
-        results = []
-
-        for pdf_name, expected in expected_rectangles.items():
-            pdf_path = TEST_PDFS_DIR / pdf_name
-
-            if not pdf_path.exists():
-                results.append((pdf_name, "SKIP", "File not found"))
-                continue
-
-            try:
-                with ArticlePDF(pdf_path) as article:
-                    figures = article.figures
-
-                    # Check figure count
-                    if len(figures) != len(expected):
-                        results.append(
-                            (
-                                pdf_name,
-                                "FAIL",
-                                f"Count mismatch: expected {len(expected)}, got {len(figures)}",
-                            )
-                        )
-                        continue
-
-                    # Check figure labels
-                    expected_labels = set(expected.keys())
-                    actual_labels = set(figures.keys())
-                    if actual_labels != expected_labels:
-                        results.append(
-                            (
-                                pdf_name,
-                                "FAIL",
-                                f"Figure labels mismatch: expected {expected_labels}, got {actual_labels}",
-                            )
-                        )
-                        continue
-
-                    # Check rectangle coordinates (with tolerance for rounding errors)
-                    all_match = True
-                    for fig_label, expected_rect in expected.items():
-                        extracted_rect = tuple(figures[fig_label].rect)
-                        expected_rect_tuple = tuple(expected_rect)
-
-                        # Use pytest.approx for floating-point comparison
-                        if extracted_rect != approx(expected_rect_tuple):
-                            all_match = False
-                            break
-
-                    if all_match:
-                        results.append((pdf_name, "PASS", ""))
-                    else:
-                        results.append(
-                            (
-                                pdf_name,
-                                "FAIL",
-                                f"Rectangle coordinates mismatch. Expected: {expected_rect_tuple}, Got: {extracted_rect}",
-                            )
-                        )
-
-            except Exception as e:
-                results.append((pdf_name, "ERROR", str(e)))
-
-        # Report results
-        failed = [r for r in results if r[1] in ["FAIL", "ERROR"]]
-
-        if failed:
-            fail_msg = "\n".join(
-                [f"{name}: {status} - {msg}" for name, status, msg in failed]
-            )
-            pytest.fail(
-                f"Rectangle extraction failed for {len(failed)}/{len(expected_rectangles)} PDFs:\n{fail_msg}"
-            )
+    @pytest.mark.parametrize("pdf_name", sorted(EXPECTED_RECTANGLES))
+    def test_all_pdfs_rectangle_extraction(
+        self, pdf_name: str, expected_rectangles: dict[str, dict[str, list[float]]]
+    ) -> None:
+        """Compare every label and rectangle, scheduling each PDF separately."""
+        pdf_path = TEST_PDFS_DIR / pdf_name
+        assert pdf_path.is_file(), f"Golden PDF not found: {pdf_path}"
+        expected = expected_rectangles[pdf_name]
+        with ArticlePDF(pdf_path) as article:
+            figures = article.figures
+            assert set(figures) == set(expected)
+            for fig_label, expected_rect in expected.items():
+                assert tuple(figures[fig_label].rect) == approx(
+                    tuple(expected_rect)
+                ), f"Rectangle mismatch for figure {fig_label}"
 
 
 FRAMED_FIGURES_PDF = (
