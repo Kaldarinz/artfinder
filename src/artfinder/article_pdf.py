@@ -5152,9 +5152,11 @@ class ArticlePDF:
         A word processor that cannot fit a figure together with its caption
         leaves the figure at the foot of one page and carries the caption over
         to the top of the next. Such a caption has nothing above it but the
-        running head, and the previous page ends in graphics below its last
-        paragraph or caption. A caption with graphics beside it is a side
-        caption at the top of its page instead, and belongs to them.
+        running head, and the previous page ends in unclaimed graphics below
+        its last paragraph, caption or matched figure. A figure already matched
+        to a caption on that page cannot belong to this caption too. A caption
+        with graphics beside it is a side caption at the top of its page instead,
+        and belongs to them.
 
         Parameters
         ----------
@@ -5206,6 +5208,7 @@ class ArticlePDF:
                     self.get_figure_caption_rects(prev_page_no, copy_rects=False),
                     self.get_table_caption_rects(prev_page_no, copy_rects=False),
                     self.get_table_rects(prev_page_no, copy_rects=False),
+                    self._figure_matches_cache[prev_page_no].values(),
                 )
             ),
         )
