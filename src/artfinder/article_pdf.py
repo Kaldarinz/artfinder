@@ -3769,6 +3769,51 @@ class ArticlePDF:
             last = rect
         return block, False
 
+    @classmethod
+    def _strip_overlaid_caption_title(
+        cls, block: TextBlockPDF, pattern: re.Pattern[str]
+    ) -> TextBlockPDF:
+        """
+        Skip white title text overprinted at a caption opening's position.
+
+        Some PDFs put a white copy of the caption title before the visible
+        label in the same text block. Only discard those leading lines when
+        they overlap the label on the same row; white text elsewhere, including
+        labels on dark backgrounds, must remain intact.
+
+        Parameters
+        ----------
+        block : TextBlockPDF
+            Block that may contain an overprinted title.
+        pattern : re.Pattern[str]
+            Pattern of the figure or table caption opening.
+
+        Returns
+        -------
+        TextBlockPDF
+            The caption block without the overprint, or the unchanged block.
+        """
+
+        for i, line in enumerate(block.lines):
+            if pattern.match(line.text.strip()):
+                if i and all(
+                    abs(previous.rect.y0 - line.rect.y0) < 1
+                    and previous.rect.intersects(line.rect)
+                    for previous in block.lines[:i]
+                ):
+                    lines = block.lines[i:]
+                    rect = Rect()
+                    for remaining in lines:
+                        rect.include_rect(remaining.rect)
+                    return replace(block, rect=rect, lines=lines)
+                break
+            if not line.spans or not all(
+                all(value >= cls.WHITE_LEVEL for value in span.color)
+                for span in line.spans
+            ):
+                break
+        return block
+
     def _find_captions(
         self, pattern: re.Pattern[str]
     ) -> dict[int, tuple[FigureCaptionPDF, ...]]:
@@ -3799,7 +3844,7 @@ class ArticlePDF:
             num_blocks = len(text_blocks)
             i = 0
             while i < num_blocks:
-                block = text_blocks[i]
+                block = self._strip_overlaid_caption_title(text_blocks[i], pattern)
                 text = block.text.strip()
                 match = pattern.match(text)
                 # The opening itself can be split into blocks: Elsevier sets
