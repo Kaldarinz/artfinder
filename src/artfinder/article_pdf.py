@@ -3758,10 +3758,13 @@ class ArticlePDF:
                 continue
             if pitch is None:
                 pitch = gap
+            # Font metrics can move a line's core edge by a fraction of
+            # a point even at constant leading; allow 1 pt of measurement
+            # slack before treating the gap as an empty line.
             elif gap > max(
                 cls.MAX_SINGLE_SPACING * last.height,
                 (1 + cls.LINE_PITCH_TOLERANCE) * pitch,
-            ):
+            ) + 1:
                 cut = Rect()
                 for line in lines[:k]:
                     cut.include_rect(line.rect)
@@ -3907,7 +3910,10 @@ class ArticlePDF:
                     # caption, not from the last line joined: that can be the
                     # tail of a line, raised above it by a superscript.
                     last_rect = block.lines[-1].rect
-                    i += 1
+                    # An internal cut ends this caption without inspecting
+                    # the next block. Leave it for the outer loop.
+                    if not cut:
+                        i += 1
                     while not cut and i < num_blocks:
                         next_block = text_blocks[i]
                         # Blocks can include inner empty lines, so we should add lines by one.
