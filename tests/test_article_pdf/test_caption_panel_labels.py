@@ -1,6 +1,5 @@
 """Regression tests for panel letters extracted before a side caption."""
 
-import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -96,14 +95,6 @@ def test_nanofabrication_figure_three() -> None:
 
     path = Path(__file__).parent / "article_pdfs" / "nanofabrication with pulsed lasers.pdf"
     with ArticlePDF(path) as article:
-        expected: dict[str, dict[str, str]] = json.loads(
-            path.with_name("all_fig_captions.json").read_text(encoding="utf-8")
-        )
-        # Figure 6 has a separate, known cross-column continuation problem.
-        # Check every other caption here so its xfail cannot hide regressions.
-        assert {k: v for k, v in article.figure_captions.items() if k != "6"} == {
-            k: v for k, v in expected[path.name].items() if k != "6"
-        }
         figure = article.figures["3"]
         assert article.figure_captions["3"] == (
             "a Typical image of Si-based nanostructures prepared by laser "

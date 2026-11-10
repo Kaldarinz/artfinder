@@ -3864,6 +3864,54 @@ class ArticlePDF:
                 break
         return block
 
+    @classmethod
+    def _continues_caption_column(
+        cls, caption: TextBlockPDF, following: TextBlockPDF
+    ) -> bool:
+        """
+        Recognize an unfinished caption balanced across two adjacent columns.
+
+        Both columns must have matching fonts, widths and line rows, separated
+        by a narrow gutter. The left column fills its last line and ends mid-
+        sentence; the right starts in lowercase. This keeps an independent
+        caption or neighbouring body paragraph out of the caption.
+
+        Parameters
+        ----------
+        caption : TextBlockPDF
+            Caption column already recognized.
+        following : TextBlockPDF
+            Next block in extraction order.
+
+        Returns
+        -------
+        bool
+            Whether the following block continues the caption in a new column.
+        """
+
+        if len(caption.lines) < 2 or len(caption.lines) != len(following.lines):
+            return False
+        following_text = following.text.lstrip()
+        if (
+            caption.text.rstrip().endswith((".", "!", "?"))
+            or not following_text[:1].islower()
+            or cls.CAPTION_PATTERN.match(following_text)
+            or cls.TABLE_CAPTION_PATTERN.match(following_text)
+        ):
+            return False
+        height = cls._line_core(caption.lines[-1]).height
+        gap = following.rect.x0 - caption.rect.x1
+        return (
+            0 < gap <= 0.25 * min(caption.rect.width, following.rect.width)
+            and abs(caption.rect.width - following.rect.width) <= height
+            and caption.rect.x1 - caption.lines[-1].rect.x1 <= height
+            and cls._same_font(cls._block_font(caption), cls._block_font(following))
+            and all(
+                abs(cls._line_core(left).y1 - cls._line_core(right).y1) < 1
+                for left, right in zip(caption.lines, following.lines)
+            )
+        )
+
     def _find_captions(
         self, pattern: re.Pattern[str]
     ) -> dict[int, tuple[FigureCaptionPDF, ...]]:
@@ -3963,6 +4011,11 @@ class ArticlePDF:
                         i += 1
                     while not cut and i < num_blocks:
                         next_block = text_blocks[i]
+                        if self._continues_caption_column(block, next_block):
+                            block = block + next_block
+                            last_rect = next_block.lines[-1].rect
+                            i += 1
+                            continue
                         # Blocks can include inner empty lines, so we should add lines by one.
                         capture_extended = False
                         lines_consumed = 0
