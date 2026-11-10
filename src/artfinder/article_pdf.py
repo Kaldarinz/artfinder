@@ -4798,9 +4798,11 @@ class ArticlePDF:
         Internal method to group the graphics of a page into clusters.
 
         Graphics (see `_get_figure_graphics`) lying within `FIGURE_GRAPHICS_GAP`
-        of each other are one cluster. A cluster then takes in the text set
-        within `FIGURE_LABEL_GAP` of it that can be a label (see
-        `_is_figure_label`), except for text in the body font above it — the
+        of each other are one cluster. A cluster then takes in individual lines
+        of text set within `FIGURE_LABEL_GAP` of it whose block can be a label
+        (see `_is_figure_label`). A PDF text block can group panel letters from
+        neighbouring figures: its empty span between lines must not join them.
+        Left out is text in the body font above a cluster — the
         heading of the section the figure opens — and, on a two-column page,
         text across the column gutter from a cluster confined to one column: a
         panel letter of the figure in the next column can lie nearer to this
@@ -4829,16 +4831,16 @@ class ArticlePDF:
 
         gutter = self._column_gutter_middle(page_no)
         labels = [
-            block
+            (block, line.rect)
             for block in self._text_cache[page_no]
             if self._is_figure_label(block, caption_rects, paragraph_rects)
+            for line in block.lines
         ]
         # A label can bring a cluster within reach of the next label, or of
         # another cluster: a few rounds settle it.
         for _ in range(3):
             added = False
-            for block in labels:
-                rect = block.rect
+            for block, rect in labels:
                 for cluster in clusters:
                     if cluster.reach.contains(rect):
                         cluster.rect.include_rect(rect)
