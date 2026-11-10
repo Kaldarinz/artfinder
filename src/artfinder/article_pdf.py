@@ -2616,9 +2616,56 @@ class ArticlePDF:
                 continue
             result.append(block)
         return tuple(
-            self._join_word_lines(block)
+            part
             for block in self._join_tile_fragments(tuple(result))
+            for part in self._split_caption_panel_labels(self._join_word_lines(block))
         )
+
+    @classmethod
+    def _split_caption_panel_labels(cls, block: TextBlockPDF) -> tuple[TextBlockPDF, ...]:
+        """
+        Separate panel letters grouped before a side caption in extraction order.
+
+        A PDF block can contain panel letters beside a caption before the
+        caption's opening. Split only when all preceding lines are parenthesized
+        letters beside the caption, outside its horizontal span. Keep each letter
+        as its own block so it can still join its figure rather than the caption.
+
+        Parameters
+        ----------
+        block : TextBlockPDF
+            Block that may start with panel letters followed by a caption.
+
+        Returns
+        -------
+        tuple[TextBlockPDF, ...]
+            Separate panel labels and caption, or the unchanged block.
+        """
+
+        for i, line in enumerate(block.lines):
+            if cls.CAPTION_PATTERN.match(line.text.strip()):
+                if not i:
+                    break
+                lines = block.lines[i:]
+                rect = Rect()
+                for remaining in lines:
+                    rect.include_rect(remaining.rect)
+                if all(
+                    (previous.rect.x1 <= rect.x0 or previous.rect.x0 >= rect.x1)
+                    and cls._is_beside(previous.rect, rect)
+                    for previous in block.lines[:i]
+                ):
+                    return (
+                        *(
+                            TextBlockPDF(rect=copy(label.rect), lines=[label])
+                            for label in block.lines[:i]
+                        ),
+                        TextBlockPDF(rect=rect, lines=lines),
+                    )
+                break
+            if not re.fullmatch(r"\([A-Za-z]\)", line.text.strip()):
+                break
+        return (block,)
 
     @classmethod
     def _join_word_lines(cls, block: TextBlockPDF) -> TextBlockPDF:

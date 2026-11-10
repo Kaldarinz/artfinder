@@ -92,7 +92,21 @@ class TestFigureCaptions:
         """Placeholder for a PDF without figures."""
         pass
 
-    @pytest.mark.parametrize("pdf_name", sorted(EXPECTED_CAPTIONS))
+    @pytest.mark.parametrize(
+        "pdf_name",
+        [
+            pytest.param(
+                name,
+                marks=pytest.mark.xfail(
+                    strict=True,
+                    reason="Figure 6 caption continues in the next column",
+                ),
+            )
+            if name == "nanofabrication with pulsed lasers.pdf"
+            else name
+            for name in sorted(EXPECTED_CAPTIONS)
+        ],
+    )
     def test_all_pdfs_caption_extraction(
         self, pdf_name: str, expected_captions: dict[str, dict[str, str]]
     ) -> None:

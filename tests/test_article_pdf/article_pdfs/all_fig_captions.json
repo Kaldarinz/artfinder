@@ -1,4 +1,13 @@
 {
+    "nanofabrication with pulsed lasers.pdf": {
+        "1": "Schematics of laser–target interaction and material nanostructuring",
+        "2": "a Typical image of ‘‘black silicon’’ spot fabricated on a Si wafer by multi-pulse fs laser ablation in vacuum; b Typical scanning electron microscopy (SEM) image of penguin-like structure of black silicon; c Typical absorption spectra from ‘‘black silicon’’ and silicon treated by different methods",
+        "3": "a Typical image of Si-based nanostructures prepared by laser plasma-assisted treatment of a Si wafer; b Photoluminescence spectra from laser plasma-treated nanostructured Si spots for different pumping wavelengths (325 and 488 nm)",
+        "4": "Nanodot array fabrication. a A monolayer of spheres deposited on a thin alumina ﬁlm is illuminated with a single laser pulse. b Near-ﬁeld enhancement underneath the spheres leads to the parallel nanodrilling of the ﬁlm. c A metal (gold in our case) is then deposited and the alumina membrane is dissolved in basic solution. d An ordered Au nanodot array is then obtained on the silicon substrate",
+        "5": "a SEM image of an Al 2 O 3 thin ﬁlm (20 nm) deposited on a Si substrate and simultaneously drilled by the near-ﬁeld enhancement of a single nanosecond laser pulse, which is produced by a lattice of SiO 2 spheres (R = 250 nm); b AFM image and c depth proﬁle of gold nanodots created on silicon substrates by the LF-PAM-based process",
+        "6": "Transmission electron microscopy image of Si nanoparticles fabricated by pulsed laser ablation at 2 Torr of He (a) and corresponding nanocluster size distribution (b); c Dependence of the nanocrystal size (dashed line) and ﬁlm porosity (solid line) on the pressure of He during the deposition; Inset typical scanning electron microscopy image of ﬁlms prepared by pulsed laser ablation; d Dependence of the position of PL peak from laser-ablated ﬁlms on the gas pressure during the deposition",
+        "7": "Transmission electron microscopy images and corresponding size distributions of a TiO x nanoparticles prepared by fs laser ablation from a Ti target in deionized water; b gold nanoparticles prepared in aqueous solution of polyethylene glycol"
+    },
     "femtosecond laser ablation in aqueous solutions.pdf": {
         "1": "TEM micrograph images and corresponding size distributions of Ag nanoparticles prepared by the fs ablation in water at 160 J/cm 2.",
         "2": "Mean size for the low (1) and highly (2) dispersed populations as a function of laser fluence for laser-synthesized Ag (a) and Au (b) nanoparticles.",
