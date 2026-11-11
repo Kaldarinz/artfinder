@@ -87,7 +87,7 @@ def test_unrelated_leading_lines_are_not_split(case: str) -> None:
         first = replace(first, rect=first.rect + (0, -30, 0, -30))
     lines = [opening, tail] if case == "caption_first" else [first, second, opening, tail]
     candidate = replace(block, lines=lines)
-    assert ArticlePDF._split_caption_panel_labels(candidate) == (candidate,)
+    assert ArticlePDF._normalize_caption_block(candidate) == (candidate,)
 
 
 def test_nanofabrication_figure_three() -> None:

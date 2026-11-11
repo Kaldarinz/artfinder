@@ -1,4 +1,17 @@
 {
+    "radio frequency radiation-induced hyperthermia using si nanoparticle-based sensitizers for mild cancer therapy_si.pdf": {
+        "S1": "(a) Nitrogen adsorption/desorption isotherm and (b) pore size distribution in dried PSi NP powder",
+        "S2": "IR transmission spectra of dried PSi NPs before (blue curve) and after (red curve) the RF irradiation at 5 W/cm 2 for 20 min.",
+        "S3": "(a) TEM image of LA-Au NPs and corresponding diffraction pattern in the inset; (b) size distribution of LA-Au NPs obtained from the TEM image",
+        "S4": "TEM images (insets) and corresponding size distributions of LA-Si NPs in deionized water at the initial concentration of 0.5 mg/mL: (b) as prepared nanoparticles; (c) after 5 days of their storage in the physiological solution. (c) Evolution of Raman spectra from LA- Si NPs for different durations of their storage in the physiological solution. The inset shows the evolution of the Raman peak position; (d) Mean size of LA-Si NPs estimated from Raman spectra",
+        "S5": "Heating of 20 mL aqueous suspension of LA-Au NPs with concentration of 50 μg/mL under RF irradiation with the intensity of 5 W/cm 2. The initial temperature of the suspension was 22 o C.",
+        "S6": "Time dependence of the RF irradiation induced temperature of 20 mL aqueous suspensions of LA-Si NPs produced by laser ablation of lightly (open circles) and heavily (close circles) boron doped c-Si wafers. The RF radiation intensity was 5 W/cm 2 and the initial temperature of the both suspensions was 22 o C.",
+        "S7": "Concentration dependences of the viability of Hep-2 cells with added PSi (left) and LA-Si (right) NPs",
+        "S8": "Optical large-scale images of 3T3 cells after RF irradiation (4 min, 2 W/cm 2) and (b) the cells loaded with PSi NPs (0.5 mg/mL) followed by the RF irradiation; (c) the cells loaded with LA- Si NPs (0.1 mg/mL) followed by the RF irradiation. The scale bars correspond to 100 µm",
+        "S9": "Time dependence of the relative tumor volume for the following groups of mice: (a) intact; (b) after intratumoral injection of 0.5 mL PSi NPs at 1 mg/mL; (c) after 2 min of the RF irradiation with intensity of 2 W/cm 2 and (d) combined action of the PSi NP injection (0.5 mL, 1 mg/mL) and RF irradiation. The 0 day of experiment corresponds to the PSi NPs injection and/or RF exposure.",
+        "S10": "CBA line mice viability for two groups: reference group intratumoral injection of PBS and 2 min of the RF irradiation with intensity of 2 W/cm 2 (blue), and combined effect of LA-Si NPs and RF radiation (black).",
+        "S11": "Dependences of the mice viability for the group with cancer tumor and intraveneously injected LA-Si NPs (red line) and for the reference group with cancer tumor (blue line)."
+    },
     "nanofabrication with pulsed lasers.pdf": {
         "1": "Schematics of laser–target interaction and material nanostructuring",
         "2": "a Typical image of ‘‘black silicon’’ spot fabricated on a Si wafer by multi-pulse fs laser ablation in vacuum; b Typical scanning electron microscopy (SEM) image of penguin-like structure of black silicon; c Typical absorption spectra from ‘‘black silicon’’ and silicon treated by different methods",
