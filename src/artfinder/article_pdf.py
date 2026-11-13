@@ -2618,53 +2618,75 @@ class ArticlePDF:
         return tuple(
             part
             for block in self._join_tile_fragments(tuple(result))
-            for part in self._split_caption_panel_labels(self._join_word_lines(block))
+            for part in self._normalize_caption_block(self._join_word_lines(block))
         )
 
     @classmethod
-    def _split_caption_panel_labels(cls, block: TextBlockPDF) -> tuple[TextBlockPDF, ...]:
+    def _normalize_caption_block(cls, block: TextBlockPDF) -> tuple[TextBlockPDF, ...]:
         """
-        Separate panel letters grouped before a side caption in extraction order.
+        Separate figure content grouped before a figure or table caption.
 
-        A PDF block can contain panel letters beside a caption before the
-        caption's opening. Split only when all preceding lines are parenthesized
-        letters beside the caption, outside its horizontal span. Keep each letter
-        as its own block so it can still join its figure rather than the caption.
+        Recognize two layouts: parenthesized panel letters beside the caption,
+        outside its horizontal span; and short plot labels wholly above it,
+        each less than half the opening line's width. Other leading text is
+        left alone so references embedded in prose do not become captions.
+
+        Keep all text available to downstream figure clustering. Side panel
+        letters become individual blocks so they cannot bridge separate panels;
+        stacked axis-title lines stay together. Further layouts can share this
+        caption-opening scan and block reconstruction.
 
         Parameters
         ----------
         block : TextBlockPDF
-            Block that may start with panel letters followed by a caption.
+            Text block that may contain figure content before a caption.
 
         Returns
         -------
         tuple[TextBlockPDF, ...]
-            Separate panel labels and caption, or the unchanged block.
+            Separate figure-content and caption blocks, or the original block.
         """
 
         for i, line in enumerate(block.lines):
-            if cls.CAPTION_PATTERN.match(line.text.strip()):
-                if not i:
-                    break
-                lines = block.lines[i:]
-                rect = Rect()
-                for remaining in lines:
-                    rect.include_rect(remaining.rect)
-                if all(
-                    (previous.rect.x1 <= rect.x0 or previous.rect.x0 >= rect.x1)
-                    and cls._is_beside(previous.rect, rect)
-                    for previous in block.lines[:i]
-                ):
-                    return (
-                        *(
-                            TextBlockPDF(rect=copy(label.rect), lines=[label])
-                            for label in block.lines[:i]
-                        ),
-                        TextBlockPDF(rect=rect, lines=lines),
-                    )
+            text = line.text.strip()
+            if not (
+                cls.CAPTION_PATTERN.match(text) or cls.TABLE_CAPTION_PATTERN.match(text)
+            ):
+                continue
+            if not i:
                 break
-            if not re.fullmatch(r"\([A-Za-z]\)", line.text.strip()):
-                break
+            leading = block.lines[:i]
+            caption_lines = block.lines[i:]
+            caption_rect = Rect()
+            for remaining in caption_lines:
+                caption_rect.include_rect(remaining.rect)
+
+            side_panels = all(
+                re.fullmatch(r"\([A-Za-z]\)", previous.text.strip())
+                and (
+                    previous.rect.x1 <= caption_rect.x0
+                    or previous.rect.x0 >= caption_rect.x1
+                )
+                and cls._is_beside(previous.rect, caption_rect)
+                for previous in leading
+            )
+            labels_above = all(
+                len(previous.text.strip()) <= cls.MAX_TABLE_CELL_CHARS
+                and previous.rect.width < 0.5 * line.rect.width
+                and previous.rect.y1 <= line.rect.y0
+                for previous in leading
+            )
+            if side_panels or labels_above:
+                groups = [[label] for label in leading] if side_panels else [leading]
+                parts: list[TextBlockPDF] = []
+                for lines in groups:
+                    rect = Rect()
+                    for label in lines:
+                        rect.include_rect(label.rect)
+                    parts.append(replace(block, rect=rect, lines=lines))
+                parts.append(replace(block, rect=caption_rect, lines=caption_lines))
+                return tuple(parts)
+            break
         return (block,)
 
     @classmethod
@@ -2951,7 +2973,7 @@ class ArticlePDF:
     def _get_text_blocks_from_page(self, page_no: int) -> tuple[TextBlockPDF, ...]:
         """
         Internal method to get all non blank text blocks from a page,
-        without manuscript line numbers.
+        without manuscript line numbers or plot labels merged into captions.
 
         A line number is a layout artifact rather than content: it corrupts the
         text of a block it was merged into, and its rectangle is a spurious
