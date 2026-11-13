@@ -515,5 +515,18 @@
         "8": "Temporal evolution of the SPR spectrum (a) and \u0003 SPR peak2 (relative to the second SPR band) (b) after incubation of bare AuNPs with Ubiquitin.",
         "9": "Temporal evolution of the absorbance of two SPR bands, \u0003 SPR peak1 and \u0003 SPR peak2, after the incubation of bare AuNPs with Ubiquitin.",
         "10": "(a) Comparison of SPR spectra of AuNPs alone, AuNPs with Ub after 85 min incubation (AuNPs + Ub), AuNPs preincubated with TTR (3 \u0003 M) and then treated with Ub after 24 h incubation ([AuNPs + TTR] + Ub), AuNPs with the Ub mutant E16V after 24 h incubation (AuNPs + E16V). (b) Fluorescence microscopy image of AuNPs-Ub aggregates stained with ThT. The boxed area is enlarged in the inset to show the presence of \ufb01brillar structures of Ub molecules that underwent the amyloid transition."
+    },
+    "anticancer activity of au_cnt nanocomposite fabricated by nanosecond pulsed laser ablation method on colon and cervical cancer.pdf": {
+        "1": "The synthesis process of the Au/CNT nanocomposites is demonstrated in this schematic diagram.",
+        "2": "UV-vis absorption spectra of AuNP, CNT, and Au/CNT nanocomposites.",
+        "3": "HRTEM Analysis of (a, b) CNT and (c, d) Au nanoparticles at different magni\ufb01cations.",
+        "4": "TEM Analysis of (a, b) Au nanoparticle decorated CNTs at different magni\ufb01cations.",
+        "5": "(a) SEM image of Au/CNT, EDS mapping of different elements, (b) carbon (C), (c) oxygen (O), and (d) gold (Au), (e) EDS spectrum of Au/CNT sample.",
+        "6": "Raman spectra of Au nanoparticles, CNTs, and Au nanoparticle decorated CNTs prepared by pulsed laser ablation technique.",
+        "7": "The powder XRD patterns of CNT, AuNP, Au/CNT nanocomposites.",
+        "8": "Colon cancer cell viability using MTT Assay: It shows the impact of AuNP, Au/CNT, and CNT treatment on HCT-116 cell viability post 48-h treatment. ** p < 0.001.",
+        "9": "Cervical cancer cell viability using MTT Assay: It shows the impact of treatment of AuNPs, Au/CNTs, and CNTs on HeLa cell viability post 48 h treatment. ** p < 0.001.",
+        "10": "Non-cancerous cell viability using MTT assay: It shows the impact of treatment of AuNPs, Au/CNTs, and CNTs on HEK-293 cell viability post-48 h treatment. ** p < 0.001.",
+        "11": "(A \u2013 D): Apoptotic death of colon cancer as revealed by DAPI staining. It shows the impact of AuNPs, Au/CNTs, and CNTs on colon cancer cells (HCT-116). (A) shows normal morphology while cells are intact and healthy; (B) treatment (40 ug/mL) of AuNP, (C) treatment (40 ug/mL) of (Au/CNTs), and (D) treatment (40 ug/mL) of (CNTs) showing formation of apoptotic bodies (Arrows). Magni\ufb01cations 200 \u00d7 and 600 \u00d7."
     }
 }

@@ -3182,7 +3182,12 @@ class ArticlePDF:
 
     def _get_drawing_objs_from_page(self, page_no: int) -> tuple[DrawingObjectPDF, ...]:
         """
-        Internal method to get all drawing objects from a page.
+        Internal method to get drawing objects not hidden by an empty clip.
+
+        PDF exports can retain a duplicate plot behind an empty clip. Ordinary
+        `get_drawings` returns those hidden paths too, so they enlarge figures
+        despite never being painted. Extended extraction supplies clip scopes;
+        a clip applies only to subsequent records at deeper levels.
 
         Parameters
         ----------
@@ -3196,13 +3201,30 @@ class ArticlePDF:
         """
 
         page = self._page(page_no)
-        drawings = tuple(
-            [
+        drawings: list[DrawingObjectPDF] = []
+        clips: list[tuple[int, Rect]] = []
+        for dr in page.get_drawings(extended=True):
+            level = cast(int, dr["level"])
+            while clips and clips[-1][0] >= level:
+                clips.pop()
+            if dr["type"] == "clip":
+                clip = copy(cast(Rect, dr["scissor"]))
+                if clips:
+                    clip &= clips[-1][1]
+                clips.append((level, clip))
+                continue
+            if dr["type"] == "group":
+                continue
+            if clips:
+                clip = clips[-1][1]
+                # Do not test the path's rect: axes and tick marks
+                # legitimately have zero width or height.
+                if clip.is_empty:
+                    continue
+            drawings.append(
                 DrawingObjectPDF(**{k: v for k, v in dr.items() if v is not None})
-                for dr in page.get_drawings()
-            ]
-        )
-        return drawings
+            )
+        return tuple(drawings)
 
     def _get_image_info_from_page(self, page_no: int) -> tuple[ImageInfoPDF, ...]:
         """
@@ -4970,8 +4992,9 @@ class ArticlePDF:
                 continue
             if min(reach.width, reach.height) < self.MAX_HAIRLINE_WIDTH:
                 continue
-            if cluster.rect.is_empty:
-                cluster.rect = copy(reach)
+            # Rect.include_rect ignores zero-area paths. They still paint
+            # axes and borders, whose outer edges must survive in the crop.
+            cluster.rect = copy(reach)
             result.append(cluster)
         return tuple(result)
 

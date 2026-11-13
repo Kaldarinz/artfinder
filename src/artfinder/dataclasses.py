@@ -681,9 +681,8 @@ class FigureClusterPDF:
     """Extent of every member, hairlines included. Distances to other elements
     are measured from it: an axis line joins the tick labels to the plot."""
     rect: Rect
-    """Extent of the members that cover an area — what a figure made of the
-    cluster is reported as. A hairline has none and does not widen it, the way
-    `Rect.include_rect` leaves it out everywhere else."""
+    """Area accumulated with `Rect.include_rect` during merging, then widened
+    to `reach` when the cluster is finalized so painted axes survive the crop."""
 
 
 @dataclass
