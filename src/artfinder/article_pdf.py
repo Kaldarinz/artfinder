@@ -141,8 +141,11 @@ class ArticlePDF:
     """Shortest a cluster of graphics may be on its longer side, in points, to
     be a figure rather than a logo, an icon or a stroke of an equation."""
     MAX_FIGURE_CAPTION_GAP = 120.0
-    """Widest blank space, in points, between a figure and its caption. Wide
-    enough for a side caption set flush with the page edge."""
+    """Widest blank space, in points, between a figure and the caption above or
+    below it — compared against the distance `_caption_distance` reports, which
+    weighs the ones set that way round. A caption beside its figure is bound by
+    the width of the row it shares with it instead (see
+    `_max_caption_distance`)."""
     MAX_FIGURE_PANEL_GAP = 40.0
     """Widest blank space, in points, across which a figure takes in a cluster
     of graphics no caption claimed — a panel set apart from the others."""
@@ -4991,12 +4994,8 @@ class ArticlePDF:
                         break
                     if self._gap_between(cluster.reach, rect) > self.FIGURE_LABEL_GAP:
                         continue
-                    if gutter is not None and not (
-                        cluster.reach.x0 < gutter < cluster.reach.x1
-                    ):
-                        in_left_column = cluster.reach.x1 <= gutter
-                        if in_left_column != (rect.x0 + rect.x1 <= 2 * gutter):
-                            continue
+                    if self._across_column_gutter(cluster.reach, rect, gutter):
+                        continue
                     if self._is_body_text(block) and rect.y1 <= cluster.reach.y0:
                         continue
                     cluster.reach = self._span(cluster.reach, rect)
@@ -5019,6 +5018,41 @@ class ArticlePDF:
             cluster.rect = copy(reach)
             result.append(cluster)
         return tuple(result)
+
+    def _max_caption_distance(self, figure_rect: Rect, caption_rect: Rect) -> float:
+        """
+        Internal method to measure how far from a figure its caption may stand.
+
+        A caption set above or below its figure is as far from it as
+        `MAX_FIGURE_CAPTION_GAP` allows. Set beside it, the caption shares its
+        row with the figure, and publishers park it in a column of its own:
+        BMC sets every caption in a narrow column left of a figure filling the
+        rest of the text width, which leaves nearly half the row blank between
+        them. What lies there belongs to the layout rather than to the distance
+        the pairing is weighed by, so the row is the limit instead.
+
+        Parameters
+        ----------
+        figure_rect : Rect
+            Rectangle of the figure.
+        caption_rect : Rect
+            Rectangle of the caption.
+
+        Returns
+        -------
+        float
+            The widest distance, in points, `_caption_distance` may report for
+            the pair.
+        """
+
+        if not self._is_beside(figure_rect, caption_rect):
+            return self.MAX_FIGURE_CAPTION_GAP
+        # `_caption_distance` weighs the distance of a side caption, so the row
+        # has to be weighed the same way for the two to be comparable.
+        return max(
+            self.MAX_FIGURE_CAPTION_GAP,
+            float(self.paragraph_width.mean) * self.SIDE_CAPTION_WEIGHT,
+        )
 
     def _caption_distance(self, figure_rect: Rect, caption_rect: Rect) -> float | None:
         """
@@ -5080,6 +5114,33 @@ class ArticlePDF:
             figure_rect.y0, caption_rect.y0
         )
         return shared_height > 0.5 * min(figure_rect.height, caption_rect.height)
+
+    @staticmethod
+    def _across_column_gutter(rect: Rect, other: Rect, gutter: float | None) -> bool:
+        """
+        Internal method to tell whether two rectangles sit in different columns.
+
+        Parameters
+        ----------
+        rect : Rect
+            One rectangle.
+        other : Rect
+            The other rectangle.
+        gutter : float | None
+            Middle of the column gutter (see `_column_gutter_middle`), or None
+            when the page is not set in two columns.
+
+        Returns
+        -------
+        bool
+            Whether `rect` lies in one column and `other` in the other one. An
+            element running across the gutter is in neither column alone, so it
+            is never across from anything.
+        """
+
+        if gutter is None or rect.x0 < gutter < rect.x1:
+            return False
+        return (rect.x1 <= gutter) != (other.x0 + other.x1 <= 2 * gutter)
 
     @staticmethod
     def _is_separated(rect: Rect, other: Rect, obstacles: Iterable[Rect]) -> bool:
@@ -5181,6 +5242,7 @@ class ArticlePDF:
 
         captions = self._figure_captions_cache[page_no]
         clusters = self._figure_clusters_cache[page_no]
+        gutter = self._column_gutter_middle(page_no)
         obstacles = [
             *self.get_paragraph_rects(page_no, copy_rects=False),
             *self.get_figure_caption_rects(page_no, copy_rects=False),
@@ -5189,17 +5251,27 @@ class ArticlePDF:
 
         # A pair that cannot be made costs more than every pair that can put
         # together, so that as many captions as possible find a figure before
-        # the distances are weighed at all.
-        unmatched = (len(captions) + 1) * self.MAX_FIGURE_CAPTION_GAP * max(
-            1.0, self.CAPTION_ABOVE_FIGURE_WEIGHT, self.SIDE_CAPTION_WEIGHT
+        # the distances are weighed at all. `_caption_distance` reports no more
+        # than the widest gap a pair may stand apart, which is the row width
+        # for a side caption and `MAX_FIGURE_CAPTION_GAP` for the others.
+        unmatched = (len(captions) + 1) * max(
+            self.MAX_FIGURE_CAPTION_GAP,
+            float(self.paragraph_width.mean) * self.SIDE_CAPTION_WEIGHT,
         )
         costs = np.full((len(captions), len(clusters)), unmatched)
         for caption_index, caption in enumerate(captions):
             if self._figure_rect_on_previous_page(page_no, caption) is not None:
                 continue
             for cluster_index, cluster in enumerate(clusters):
+                # A caption takes the figure set in its own column, never the
+                # one beside it in the next.
+                if self._across_column_gutter(cluster.reach, caption.rect, gutter):
+                    continue
                 distance = self._caption_distance(cluster.reach, caption.rect)
-                if distance is None or distance > self.MAX_FIGURE_CAPTION_GAP:
+                if (
+                    distance is None
+                    or distance > self._max_caption_distance(cluster.reach, caption.rect)
+                ):
                     continue
                 if self._is_separated(cluster.reach, caption.rect, obstacles):
                     continue

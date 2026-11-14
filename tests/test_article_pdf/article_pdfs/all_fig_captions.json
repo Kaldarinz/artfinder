@@ -541,5 +541,18 @@
         "9": "Cervical cancer cell viability using MTT Assay: It shows the impact of treatment of AuNPs, Au/CNTs, and CNTs on HeLa cell viability post 48 h treatment. ** p < 0.001.",
         "10": "Non-cancerous cell viability using MTT assay: It shows the impact of treatment of AuNPs, Au/CNTs, and CNTs on HEK-293 cell viability post-48 h treatment. ** p < 0.001.",
         "11": "(A \u2013 D): Apoptotic death of colon cancer as revealed by DAPI staining. It shows the impact of AuNPs, Au/CNTs, and CNTs on colon cancer cells (HCT-116). (A) shows normal morphology while cells are intact and healthy; (B) treatment (40 ug/mL) of AuNP, (C) treatment (40 ug/mL) of (Au/CNTs), and (D) treatment (40 ug/mL) of (CNTs) showing formation of apoptotic bodies (Arrows). Magni\ufb01cations 200 \u00d7 and 600 \u00d7."
+    },
+    "green synthesis of silica-coated gold nanoparticles employing femtosecond laser, solid targets, and water.pdf": {
+        "1": "Steps A ablation of a Si target, B fragmentation and oxidation of the SiNP@ SiO 2 (large) leading to small SiO 2 NPs, and C gold target ablation in SiO 2 NPs suspension leading to the formation of AuNPs coated with silica shell (AuNP@SiO 2). Arrows indicate the laser incidence. (Illustration is not meant to represent the scales)",
+        "2": "At the top is shown a schematic illustration of the methodology: 1 The solid silicon target is ablated while immersed in ultrapure water; 2 The resulting solution undergoes irradiation to fragment the SiNPs superficially oxidated and their subsequent total oxidation, rendering a SiO 2 NPs suspension completely clear; 4 The gold target immersed in SiO 2 NPs suspension is ablated, leading to the formation of core–shell AuNP@SiO 2 as presented in step 5. At the bottom are shown the experimental results corresponding to the same steps",
+        "3": "Absorbance spectrum of the initial SiNP@ SiO 2 suspension after fs laser ablation (brown) and after the fragmentation by the ns laser pulse irradiation (blue). The visual aspect of the two solutions is presented in the photographs at right side",
+        "4": "TEM images of the ablated Silicon suspensions before (SiNP@SiO 2) and after laser fragmentation (SiO 2 suspension)",
+        "5": "UV–Vis spectrum of AuNP@SiO 2 produced with an ablation time of 6 min. The colloidal solutions had absorption peak centered at 522.05 nm",
+        "6": "Bimodal hydrodynamic diameter distribution for AuNP@SiO 2. The colloidal suspension has a main and a secondary population, respectively composed of approximately 91% and 9% of the total volume of nanoparticles",
+        "7": "Zeta potential distribution for AuNP@SiO 2 produced with an ablation time of 6 min. The mean zeta potential (-72.0 ± 0.3) mV explains the excellent colloidal stability",
+        "8": "TEM images of AuNP@SiO 2 synthesized with the femtosecond laser",
+        "9": "Particle size distribution histogram of spherical Gold nanoparticles determined from TEM image. Solid line represents two distinct populations, with an average diameter of (15.23 ± 0.92) nm (dashed line)",
+        "10": "Hydrodynamic diameter for AuNP@SiO2 produced with Au target irradiation time of 2 and 6 min. The mean hydrodynamic diameter of the gold nanoparticles produced at 2 min was (133 ± 58) nm, while for 6 min, it decreased to (129 ± 51) nm",
+        "11": "XRD characterization of laser-produced green nanoparticles. The analysis enabled the identification of four crystalline Au phases, Si bulk residues, amorphous SiO 2, and GaAs substrate phases"
     }
 }
