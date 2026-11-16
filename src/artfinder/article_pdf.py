@@ -78,11 +78,10 @@ class ArticlePDF:
 
     Known limitations
     -----------------
-    The caption filter in `_find_figure_captions` keeps only captions whose font
-    matches the single most common caption font in the whole document. In a
-    combined main-text-plus-supplementary PDF whose supplementary captions are
-    set in a different font from the main ones, the smaller of the two sets is
-    therefore dropped.
+    When several openings share a label, the caption filter favours the
+    document's dominant caption font and size. Genuine duplicate captions in
+    another font can therefore be dropped. Unique labels remain independent
+    of the dominant font, including supplementary captions.
 
     Figure labels that no test PDF has needed yet are not recognised: `Fig. SI1`,
     `Figure S-1`, and Roman numerals.
@@ -127,6 +126,9 @@ class ArticlePDF:
     a multiple of the height of a line. Line boxes are shorter than the leading
     they are set at: 12 pt Times single-spaced by a word processor puts lines of
     13.5 pt 16 pt apart."""
+    CAPTION_PAGE_EDGE_FRACTION = 0.15
+    """Top and bottom page bands within which an unfinished caption can continue
+    across a page break, as a fraction of each page's height."""
     MIN_FIGURE_IMAGE_OVERLAP = 0.9
     """Fraction of an image reaching above the bounds of a figure that must lie
     within them for the image to be part of the figure."""
@@ -614,6 +616,44 @@ class ArticlePDF:
         return median(heights) if heights else 0.0
 
     @cached_property
+    def _font_line_pitches(self) -> dict[tuple[str, float], float]:
+        """
+        Measure repeated leading separately for each text font and size.
+
+        Captions can use intermediate leading: neither the body's pitch nor
+        single spacing. Matching-font neighbouring lines provide evidence for
+        that leading even when a caption has only two lines of its own.
+
+        Returns
+        -------
+        dict[tuple[str, float], float]
+            Median pitch by dominant font family and rounded size, requiring
+            at least two samples per font.
+        """
+
+        gaps: dict[tuple[str, float], list[float]] = {}
+        for page_no in range(self.file.page_count):
+            lines = [
+                line for block in self._text_cache[page_no] for line in block.lines
+            ]
+            fonts = [
+                self._block_font(TextBlockPDF(rect=line.rect, lines=[line]))
+                for line in lines
+            ]
+            for i, (line, following) in enumerate(zip(lines, lines[1:])):
+                font = fonts[i]
+                if font is None or font != fonts[i + 1]:
+                    continue
+                first, second = self._line_core(line), self._line_core(following)
+                gap = second.y1 - first.y1
+                if (
+                    0.5 * min(first.height, second.height) < gap < self.MAX_LINE_PITCH
+                    and min(first.x1, second.x1) > max(first.x0, second.x0)
+                ):
+                    gaps.setdefault(font, []).append(gap)
+        return {font: median(values) for font, values in gaps.items() if len(values) >= 2}
+
+    @cached_property
     def paragraph_pitch(self) -> float:
         """
         Distance between the baselines of consecutive lines of body paragraphs.
@@ -972,7 +1012,7 @@ class ArticlePDF:
     @cached_property
     def figure_count(self) -> int:
         """Number of figures in the document."""
-        return len(self.get_figure_caption_rects(copy_rects=False))
+        return sum(len(captions) for captions in self._figure_captions_cache.values())
 
     # Public methods
 
@@ -2556,6 +2596,14 @@ class ArticlePDF:
                     result.append(copy(block.rect))
                 else:
                     result.append(block.rect)
+        if rect_type in {"_figure_captions", "_table_captions"}:
+            for captions in req_blocks.values():
+                for caption in captions:
+                    for continuation_page, rect in caption.continuations:
+                        if page_no is not None and continuation_page != page_no:
+                            continue
+                        if clip is None or clip.contains(rect):
+                            result.append(copy(rect) if copy_rects else rect)
         return result
 
     def _get_figure_component_by_type(
@@ -3959,6 +4007,120 @@ class ArticlePDF:
             )
         )
 
+    def _join_caption_pages(
+        self, captions: dict[int, tuple[FigureCaptionPDF, ...]]
+    ) -> dict[int, tuple[FigureCaptionPDF, ...]]:
+        """
+        Join unfinished bottom-of-page captions to matching text on the next page.
+
+        The opening remains on its own page for figure matching. Continuation
+        rectangles are kept separately so marking never draws a rectangle
+        spanning coordinates from two pages. Both margins, font, and leading
+        must agree, with no intervening content or new caption opening.
+
+        Parameters
+        ----------
+        captions : dict[int, tuple[FigureCaptionPDF, ...]]
+            Captions found independently on each page.
+
+        Returns
+        -------
+        dict[int, tuple[FigureCaptionPDF, ...]]
+            Captions with their continuation text and page-local rectangles.
+        """
+
+        for page_no in range(self.file.page_count - 1):
+            if not captions[page_no]:
+                continue
+            page_rect = self._page(page_no).rect
+            blocks = sorted(
+                (
+                    b for b in self._text_cache[page_no]
+                    if not self._is_running_matter(b.rect)
+                ),
+                key=lambda b: (b.rect.y0, b.rect.x0),
+            )
+            following = sorted(
+                (
+                    b for b in self._text_cache[page_no + 1]
+                    if not self._is_running_matter(b.rect)
+                ),
+                key=lambda b: (b.rect.y0, b.rect.x0),
+            )
+            for index, caption in enumerate(captions[page_no]):
+                if (
+                    caption.rect.y1
+                    < page_rect.y1 - self.CAPTION_PAGE_EDGE_FRACTION * page_rect.height
+                    or caption.text.rstrip().endswith((".", "!", "?"))
+                    or any(b.rect.y0 >= caption.rect.y1 for b in blocks)
+                    or not following
+                    or following[0].rect.y0
+                    > self.CAPTION_PAGE_EDGE_FRACTION * self._page(page_no + 1).rect.height
+                ):
+                    continue
+                lines = [
+                    line
+                    for b in blocks
+                    for line in b.lines
+                    if caption.rect.contains(line.rect)
+                ]
+                if len(lines) < 2:
+                    continue
+                # A full final line and a lowercase/digit opening are evidence
+                # of a sentence carried across the page, not a new paragraph.
+                last = self._line_core(lines[-1])
+                first_text = following[0].text.lstrip()
+                if (
+                    caption.rect.x1 - last.x1 > last.height
+                    or not first_text
+                    or not (first_text[0].islower() or first_text[0].isdigit())
+                ):
+                    continue
+                font = self._block_font(
+                    TextBlockPDF(rect=lines[0].rect, lines=[lines[0]])
+                )
+                pitch = last.y1 - self._line_core(lines[-2]).y1
+                extra: list[TextLinePDF] = []
+                rect = Rect()
+                for b in following:
+                    for line in b.lines:
+                        core = self._line_core(line)
+                        gap = core.y1 - self._line_core(extra[-1]).y1 if extra else pitch
+                        if (
+                            abs(core.x0 - caption.rect.x0) > 1
+                            or core.x1 > caption.rect.x1 + 1
+                            or self._block_font(
+                                TextBlockPDF(rect=line.rect, lines=[line])
+                            ) != font
+                            or abs(gap - pitch) > max(1, self.LINE_PITCH_TOLERANCE * pitch)
+                            or self.CAPTION_PATTERN.match(line.text.strip())
+                            or self.TABLE_CAPTION_PATTERN.match(line.text.strip())
+                        ):
+                            break
+                        extra.append(line)
+                        rect.include_rect(line.rect)
+                    else:
+                        continue
+                    break
+                if extra:
+                    text = self._join_caption_lines(lines + extra)
+                    opening = self.CAPTION_PATTERN.match(
+                        text
+                    ) or self.TABLE_CAPTION_PATTERN.match(text)
+                    if opening is not None:
+                        updated = replace(
+                            caption,
+                            text=text[opening.end() :].strip(),
+                            lines_no=caption.lines_no + len(extra),
+                            continuations=((page_no + 1, rect),),
+                        )
+                        captions[page_no] = (
+                            captions[page_no][:index]
+                            + (updated,)
+                            + captions[page_no][index + 1 :]
+                        )
+        return captions
+
     def _find_captions(
         self, pattern: re.Pattern[str]
     ) -> dict[int, tuple[FigureCaptionPDF, ...]]:
@@ -4008,12 +4170,13 @@ class ArticlePDF:
                         match = pattern.match(text)
                 if match:
                     # Some paragraphs can also begin with `pattern`, but in almost all cases
-                    # font of `pattern` in figure caption is different from font of paragraph.
-                    # Therefore we save font properties for the mathed block for later use.
+                    # font or size of the opening differs from body text.
+                    # Keep both for the document-wide filter below.
                     font_props = (
                         block.lines[0].spans[0].char_flags,
                         block.lines[0].spans[0].flags,
                         block.lines[0].spans[0].font,
+                        round(block.lines[0].spans[0].size, 1),
                     )
 
                     # I have encountered three possible cases:
@@ -4052,6 +4215,11 @@ class ArticlePDF:
                     # caption, not from the last line joined: that can be the
                     # tail of a line, raised above it by a superscript.
                     last_rect = block.lines[-1].rect
+                    caption_font = self._block_font(block)
+                    font_pitch = (
+                        self._font_line_pitches.get(caption_font)
+                        if caption_font else None
+                    )
                     # An internal cut ends this caption without inspecting
                     # the next block. Leave it for the outer loop.
                     if not cut:
@@ -4134,6 +4302,25 @@ class ArticlePDF:
                                     )
                                     or single_spaced
                                 )
+                                # Intermediate leading is accepted only when
+                                # matching-font lines elsewhere corroborate it.
+                                # Do not widen the spacing limit for body text.
+                                if not consecutive and font_pitch is not None:
+                                    next_font = self._block_font(
+                                        TextBlockPDF(rect=next_line.rect, lines=[next_line])
+                                    )
+                                    core_gap = (
+                                        self._line_core(next_line).y1
+                                        - self._line_core(block.lines[-1]).y1
+                                    )
+                                    consecutive = (
+                                        next_font == caption_font
+                                        and abs(core_gap - font_pitch)
+                                        < max(
+                                            vertical_thr,
+                                            self.LINE_PITCH_TOLERANCE * font_pitch,
+                                        )
+                                    )
                             if consecutive and min(
                                 next_line.rect.x1, last_rect.x1
                             ) > max(next_line.rect.x0, last_rect.x0):
@@ -4177,18 +4364,27 @@ class ArticlePDF:
         captions: dict[int, tuple[FigureCaptionPDF, ...]] = {}
         for page_no in range(self.file.page_count):
             captions.update(_find_figure_captions_in_page(self._page(page_no)))
-        # Some text paragraphs can start the same way as figure caption.
-        # Text paragraph usually have their font_flag different from font_flag
-        # of matched_pattern in real figure caption.
-        # Therefore we only use found FigureCaption with the most common font_flag
-        most_common_flags = Counter(
+        captions = self._join_caption_pages(captions)
+        # Body references can start like captions. Their opening font or size
+        # usually differs from the dominant caption font.
+        font_counts = Counter(
             caption.font_props
             for page_captions in captions.values()
             for caption in page_captions
-        ).most_common(1)
-        if not most_common_flags:
+        )
+        if not font_counts:
             return captions
-        most_common_flag = most_common_flags[0][0]
+        # PDF transforms can vary a nominal size slightly between pages.
+        # Count nearby sizes together, without merging body and caption sizes.
+        most_common_flag = max(
+            font_counts,
+            key=lambda props: sum(
+                count
+                for other, count in font_counts.items()
+                if props[:3] == other[:3]
+                and abs(props[3] - other[3]) <= self.FONT_SIZE_TOLERANCE
+            ),
+        )
         # A caption set in another font is still kept when it is the only
         # opening anywhere with its label: an author can type `Figure 1.` in
         # bold and `Fig. 2` in the body font. A paragraph starting with
@@ -4203,7 +4399,11 @@ class ArticlePDF:
                 [
                     caption
                     for caption in page_captions
-                    if caption.font_props == most_common_flag
+                    if (
+                        caption.font_props[:3] == most_common_flag[:3]
+                        and abs(caption.font_props[3] - most_common_flag[3])
+                        <= self.FONT_SIZE_TOLERANCE
+                    )
                     or label_counts[caption.label] == 1
                 ]
             )

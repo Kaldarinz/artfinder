@@ -554,5 +554,21 @@
         "9": "Particle size distribution histogram of spherical Gold nanoparticles determined from TEM image. Solid line represents two distinct populations, with an average diameter of (15.23 ± 0.92) nm (dashed line)",
         "10": "Hydrodynamic diameter for AuNP@SiO2 produced with Au target irradiation time of 2 and 6 min. The mean hydrodynamic diameter of the gold nanoparticles produced at 2 min was (133 ± 58) nm, while for 6 min, it decreased to (129 ± 51) nm",
         "11": "XRD characterization of laser-produced green nanoparticles. The analysis enabled the identification of four crystalline Au phases, Si bulk residues, amorphous SiO 2, and GaAs substrate phases"
+    },
+    "nanostructuring of alcu alloy nps obtained by flasis.pdf": {
+        "1": "Equilibrium phase diagram of AlCu system alloy. Dashed dotted lines mark the Cu weight % used in the alloy samples.",
+        "2": "Optical and SEM microcopy images of as-cast microstructures of substrate targets. (a) OM image of AlCu 0.5%, without T6 treatment; (b) SEM image of AlCu 12%. (c) OM image of AlCu 33.3% (eutectic composition); (d) SEM image of AlCu 40% sample; (e) SEM image of AlCu 53.7%.",
+        "3": "(a) SEM of AlCu 12%, (b) EDS corresponding to the red square zone and (c) EDS at the green circle zone in the micrograph. In Panels (b) and (c) X axis shows energy in KeV and Y axis number of counts.",
+        "4": "SEM of AlCu 40%, (b) EDS corresponding to the pink cross zone and (c) EDS at the green circle zone in the micrograph. In Panels (b) and (c) X axis shows energy in KeV and Y axis number of counts.",
+        "5": "(a) SEM micrograph of AlCu 53.7%, (b) EDS corresponding to the green circle zone, (c) EDS at red square zone and (d) EDS at the cyan cross zone in the micrograph. In Panels (b), (c) and (d) X axis shows energy in KeV and Y axis number of counts.",
+        "6": "SEM image of ablated surface of (a) AlCu 12% and (b) AlCu 33.3%; (c) AlCu 40%. Panels (b) and (c) are enlargements within the grooves for AlCu 33.3% and AlCu 40%.",
+        "7": "HADDF images of colloid obtained by FLASiS of AlCu 33.3% alloy: (a) Panoramic view of the large NPs; (b) image showing internal structures (dashed line yellow circles) with a 100 nm resolution; (c) single NPs showing details of internal structure; (d) another single NP surrounded by nanopetals-like forms.",
+        "8": "Analysis of colloidal NPs obtained by FLASiS of AlCu 53.7% bulk alloy: (a) structured NP; (b) mapping of Al content distribution in the structured NP; (c) mapping of Cu content distribution in the structured NP; (d) superimposed of Al and Cu mapping.",
+        "9": "(a) TEM image of a single AlCu 53.7% alloy NP with non-uniform inclusions. The green circle corresponds to the region analysed by EDS; (b) EDS spectrum of the region marked in (a).",
+        "10": "(a) TEM images of a selected alloy NP; (b) EDS spectrum corresponding to the area marked with a green circle in the NP.",
+        "11": "Colloid AlCu alloys extinction spectra for different Cu percentages. Pure Al and pure Cu synthesized by FLASiS in water are added for completeness.",
+        "12": "Extinction spectra for NPs colloids obtained from pure Cu (a) and pure Al (b) targets by FLASiS in water. Solid and dashed-dotted lines correspond to experimental data and the best fit, respectively. Insets show the Relative Abundance (RA) of the NPs within the samples for each metal. Cu colloids (a) present two populations with total (core-shell) radii of 0.84 nm and 110 nm with RA indicated in the Y left axis and Y right axis respectively. Al colloids (b) present alumina NPs with a size distribution having a modal radius of 10.1 nm.",
+        "13": "Extinction spectra for alumina NP of 10 nm radii with Cu inclusions of 1 nm radii for different f values.",
+        "14": "Extinction spectra for alumina NP of 20 nm radii with Cu inclusions of 1 nm radii for different f values."
     }
 }

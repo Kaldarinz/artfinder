@@ -662,9 +662,11 @@ class FigureCaptionPDF:
     matched_pattern: str
     label: str
     text: str
-    font_props: tuple[int, int, str]
+    font_props: tuple[int, int, str, float]
     lines_no: int
     rect: Rect
+    continuations: tuple[tuple[int, Rect], ...] = ()
+    """Caption-only rectangles on later pages; `rect` stays on the opening page."""
 
 
 @dataclass
