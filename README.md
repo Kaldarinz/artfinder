@@ -44,6 +44,12 @@ My main goal is to make a systematic analysis in one particular (and rather narr
 pip install artfinder
 ```
 
+For PDF captions printed inside figure images, optionally install the `tesseract`
+command and its English language data (for example, `tesseract-ocr` and
+`tesseract-ocr-eng` on Debian/Ubuntu). Artfinder uses OCR for captions at the
+foot of those images; native captions do not require Tesseract. OCR may
+misread small type and scientific symbols.
+
 ## Usage
 
 ### Search

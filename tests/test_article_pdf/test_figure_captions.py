@@ -2,6 +2,8 @@
 
 import json
 import re
+import unicodedata
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,10 @@ from artfinder.article_pdf import ArticlePDF
 
 TEST_PDFS_DIR = Path(__file__).parent / "article_pdfs"
 CAPTIONS_JSON = TEST_PDFS_DIR / "all_fig_captions.json"
+RASTER_CAPTIONS_PDF = (
+    "laser assisted synthesis of carbon nanoparticles with controlled viscosities"
+    " for printing applications.pdf"
+)
 EXPECTED_CAPTIONS: dict[str, dict[str, str]] = json.loads(
     CAPTIONS_JSON.read_text(encoding="utf-8")
 )
@@ -94,10 +100,43 @@ class TestFigureCaptions:
 
     @pytest.mark.parametrize("pdf_name", sorted(EXPECTED_CAPTIONS))
     def test_all_pdfs_caption_extraction(
-        self, pdf_name: str, expected_captions: dict[str, dict[str, str]]
+        self, pdf_name: str, expected_captions: dict[str, dict[str, str]],
+        request: pytest.FixtureRequest,
     ) -> None:
         """Compare every label and full caption, scheduling each PDF separately."""
         pdf_path = TEST_PDFS_DIR / pdf_name
         assert pdf_path.is_file(), f"Golden PDF not found: {pdf_path}"
+        expected = expected_captions[pdf_name]
+        if pdf_name == RASTER_CAPTIONS_PDF:
+            request.getfixturevalue("tesseract")
         with ArticlePDF(pdf_path) as article:
-            assert article.figure_captions == expected_captions[pdf_name]
+            if pdf_name != RASTER_CAPTIONS_PDF:
+                assert article.figure_captions == expected
+                return
+
+            def letters_and_digits(text: str) -> str:
+                return "".join(c for c in unicodedata.normalize("NFKC", text) if c.isalnum())
+
+            # The reference is a transcription, not Tesseract output. Allow
+            # small OCR differences in spacing and low-resolution glyphs.
+            assert article.figure_captions.keys() == expected.keys()
+            for label, text in expected.items():
+                actual = article.figure_captions[label]
+                assert SequenceMatcher(
+                    None, letters_and_digits(actual), letters_and_digits(text), autojunk=False
+                ).ratio() >= 0.95, (label, actual)
+
+            pages = {3: ["1"], 4: ["2"], 5: ["3"], 6: ["4"],
+                     7: ["5", "6"], 8: ["7"], 9: ["8"]}
+            line_counts = [3, 4, 1, 2, 1, 2, 3, 2]
+            for page_no in range(article.file.page_count):
+                captions = article.get_figure_caption_rects(page_no)
+                labels = pages.get(page_no, [])
+                assert len(captions) == len(labels)
+                images = article.get_image_rects(page_no) if labels else []
+                for label, rect, image in zip(labels, captions, images, strict=True):
+                    figure = article.figures[label]
+                    assert figure.caption.rect == rect
+                    assert figure.caption.lines_no == line_counts[int(label) - 1]
+                    assert image.contains(rect) and image.contains(figure.rect)
+                    assert 2 < rect.y0 - figure.rect.y1 < 8

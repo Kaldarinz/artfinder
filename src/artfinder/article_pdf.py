@@ -13,6 +13,7 @@ Letter prefixes, dotted numbers and panel letters keep these figures distinct.
 import html
 import logging
 import re
+import subprocess
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable, Sequence
@@ -21,9 +22,10 @@ from dataclasses import replace
 from functools import cached_property
 from itertools import chain
 from math import floor, inf
-from statistics import median
 from os import PathLike
 from pathlib import Path
+from shutil import which
+from statistics import median
 from typing import TYPE_CHECKING, Any, Literal, cast
 from warnings import warn
 
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
 else:
     from pymupdf import Page
 
+from artfinder._raster_captions import read_raster_caption
 from artfinder.dataclasses import (
     DocumentElementsPDF,
     DrawingObjectPDF,
@@ -2472,8 +2475,8 @@ class ArticlePDF:
         Parameters
         ----------
         elements : list[str] | str | None
-            Document elements to mark. Can be 'text', 'drawing', 'image',
-            'figure_caption', 'header', or 'all'. If None, marks all elements.
+            Document elements to mark, e.g. 'figures', 'figure_captions',
+            'text', 'drawings', 'images', or 'all'. If None, marks all elements.
         page_number : int | None, optional
             Page number (0-indexed) to mark. If None, marks all pages.
         output_path : PathLike | str | None, optional
@@ -2625,10 +2628,17 @@ class ArticlePDF:
             page_ind = self._figure_label_to_page_ind[fig_label]
             page_components = getattr(self, f"_{component_type}_cache")[page_ind]
 
+            figure = figures[fig_label]
             components.extend(
                 deepcopy(component) if copy_objects else component
                 for component in page_components
-                if figures[fig_label].rect.contains(component.rect)
+                if figure.rect.contains(component.rect)
+                or (
+                    component_type == "images"
+                    and figure.caption.raster_figure_rect is not None
+                    and component.rect.contains(figure.rect)
+                    and component.rect.contains(figure.caption.rect)
+                )
             )
         return components
 
@@ -3786,9 +3796,108 @@ class ArticlePDF:
         return result
 
     def _find_figure_captions(self) -> dict[int, tuple[FigureCaptionPDF, ...]]:
-        """Internal method to find figure captions on page."""
+        """Find native captions and recover captions baked into figure images.
 
-        return self._find_captions(self.CAPTION_PATTERN)
+        Returns
+        -------
+        dict[int, tuple[FigureCaptionPDF, ...]]
+            Captions keyed by the page where they are printed.
+        """
+
+        captions = self._find_captions(self.CAPTION_PATTERN)
+        executable = which("tesseract")
+        if executable is None:
+            return captions
+
+        # A punctuated or typographically distinct opening is good native
+        # evidence. A bare 'Fig. 1 shows ...' in the body font is not: keep it
+        # unless a caption actually printed in a figure carries the same label.
+        def clear_opening(caption: FigureCaptionPDF) -> bool:
+            _, flags, name, size = caption.font_props
+            return (
+                self._caption_delimiter(caption.matched_pattern)
+                or bool(flags & pymupdf.TEXT_FONT_BOLD)
+                or not self._same_font((self._font_family(name), size), self.body_font)
+            )
+
+        clear = {
+            page_no: tuple(caption for caption in page_captions if clear_opening(caption))
+            for page_no, page_captions in captions.items()
+        }
+        clear_labels = {
+            caption.label for page_captions in clear.values() for caption in page_captions
+        }
+        raster_labels: set[str] = set()
+        recovered: dict[int, list[FigureCaptionPDF]] = {}
+        for page_no in range(self.file.page_count):
+            page = self._page(page_no)
+            # Header/footer detection uses native text and images, not captions.
+            for image in self.get_image_rects(page_no, copy_rects=False):
+                if (
+                    min(image.width, image.height) < self.MIN_FIGURE_SIDE
+                    or image.intersects(self.header_rect)
+                    or image.intersects(self.footer_rect)
+                    or any(
+                        self._gap_between(image, caption.rect) <= self.FIGURE_LABEL_GAP
+                        for caption in clear[page_no]
+                    )
+                ):
+                    continue
+                try:
+                    raster = read_raster_caption(
+                        page, image, executable,
+                        lambda text: self._raster_caption_opening(text) is not None,
+                    )
+                except subprocess.TimeoutExpired:
+                    logger.debug(f"Raster caption OCR timed out on page {page_no + 1}")
+                    continue
+                except (OSError, subprocess.CalledProcessError) as exc:
+                    logger.debug(f"Raster caption OCR unavailable: {exc}")
+                    return captions
+                if raster is None or any(
+                    block.rect.intersects(raster.rect) for block in self._text_cache[page_no]
+                ):
+                    continue
+                match = self._raster_caption_opening(raster.text)
+                if match is None:
+                    continue
+                label = self._caption_label(match)
+                text = self._normalize_caption_whitespace(raster.text[match.end():])
+                if label in clear_labels or label in raster_labels or not text:
+                    continue
+                raster_labels.add(label)
+                recovered.setdefault(page_no, []).append(
+                    FigureCaptionPDF(
+                        matched_pattern=match.group(), label=label, text=text,
+                        font_props=(0, 0, "", 0.0), lines_no=raster.lines_no,
+                        rect=raster.rect, raster_figure_rect=raster.figure_rect,
+                    )
+                )
+        if not recovered:
+            return captions
+        for page_no, page_captions in captions.items():
+            native = tuple(caption for caption in page_captions if caption.label not in raster_labels)
+            raster_captions = recovered.get(page_no)
+            captions[page_no] = (
+                tuple(sorted(
+                    (*native, *raster_captions), key=lambda c: (c.rect.y0, c.rect.x0)
+                ))
+                if raster_captions else native
+            )
+        return captions
+
+    @staticmethod
+    def _caption_delimiter(opening: str) -> bool:
+        """Tell a punctuated label apart from a reference opening a sentence."""
+        return opening.rstrip().endswith((".", ":", "–", "—"))
+
+    @classmethod
+    def _raster_caption_opening(cls, text: str) -> re.Match[str] | None:
+        """Require a label delimiter when no usable font properties are present."""
+        match = cls.CAPTION_PATTERN.match(text) or cls._PANEL_CAPTION_PATTERN.match(text)
+        if match is not None and cls._caption_delimiter(match.group()):
+            return match
+        return None
 
     @classmethod
     def _cut_at_table_row(cls, block: TextBlockPDF) -> tuple[TextBlockPDF, bool]:
@@ -5575,6 +5684,8 @@ class ArticlePDF:
         )
         costs = np.full((len(captions), len(clusters)), unmatched)
         for caption_index, caption in enumerate(captions):
+            if caption.raster_figure_rect is not None:
+                continue
             if self._figure_rect_on_previous_page(page_no, caption) is not None:
                 continue
             for cluster_index, cluster in enumerate(clusters):
@@ -5599,7 +5710,14 @@ class ArticlePDF:
                     continue
                 costs[caption_index, cluster_index] = distance
 
-        figures: dict[int, FigureClusterPDF] = {}
+        # The caption and figure are parts of one image, so the match is
+        # already known. The source image itself (containing a caption) was
+        # excluded from the ordinary graphics candidates.
+        figures = {
+            index: FigureClusterPDF(copy(rect), copy(rect))
+            for index, caption in enumerate(captions)
+            if (rect := caption.raster_figure_rect) is not None
+        }
         claimed: set[int] = set()
         for caption_index, cluster_index in zip(*linear_sum_assignment(costs)):
             if costs[caption_index, cluster_index] >= unmatched:
@@ -5622,6 +5740,8 @@ class ArticlePDF:
                     continue
                 nearest: tuple[float, int] | None = None
                 for caption_index, figure in figures.items():
+                    if captions[caption_index].raster_figure_rect is not None:
+                        continue
                     caption_rect = captions[caption_index].rect
                     if self._across_column_gutter(
                         figure.reach, cluster.reach, gutter
@@ -5769,7 +5889,7 @@ class ArticlePDF:
             figure is on the caption's own page.
         """
 
-        if page_no == 0:
+        if page_no == 0 or caption.raster_figure_rect is not None:
             return None
         if any(
             self._is_beside(cluster.reach, caption.rect)

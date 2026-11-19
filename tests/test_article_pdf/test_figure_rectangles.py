@@ -15,6 +15,10 @@ from artfinder.article_pdf import ArticlePDF
 # Get the test PDFs directory
 TEST_PDFS_DIR = Path(__file__).parent / "article_pdfs"
 RECTANGLES_JSON = TEST_PDFS_DIR / "figure_rects.json"
+RASTER_CAPTIONS_PDF = (
+    "laser assisted synthesis of carbon nanoparticles with controlled viscosities"
+    " for printing applications.pdf"
+)
 EXPECTED_RECTANGLES: dict[str, dict[str, list[float]]] = json.loads(
     RECTANGLES_JSON.read_text(encoding="utf-8")
 )
@@ -78,18 +82,22 @@ class TestFigureRectangles:
 
     @pytest.mark.parametrize("pdf_name", sorted(EXPECTED_RECTANGLES))
     def test_all_pdfs_rectangle_extraction(
-        self, pdf_name: str, expected_rectangles: dict[str, dict[str, list[float]]]
+        self, pdf_name: str, expected_rectangles: dict[str, dict[str, list[float]]],
+        request: pytest.FixtureRequest,
     ) -> None:
         """Compare every label and rectangle, scheduling each PDF separately."""
         pdf_path = TEST_PDFS_DIR / pdf_name
         assert pdf_path.is_file(), f"Golden PDF not found: {pdf_path}"
         expected = expected_rectangles[pdf_name]
+        raster = pdf_name == RASTER_CAPTIONS_PDF
+        if raster:
+            request.getfixturevalue("tesseract")
         with ArticlePDF(pdf_path) as article:
             figures = article.figures
             assert set(figures) == set(expected)
             for fig_label, expected_rect in expected.items():
                 assert tuple(figures[fig_label].rect) == approx(
-                    tuple(expected_rect)
+                    tuple(expected_rect), abs=2 if raster else None
                 ), f"Rectangle mismatch for figure {fig_label}"
 
 

@@ -675,6 +675,8 @@ class FigureCaptionPDF:
     rect: Rect
     continuations: tuple[tuple[int, Rect], ...] = ()
     """Caption-only rectangles on later pages; `rect` stays on the opening page."""
+    raster_figure_rect: Rect | None = None
+    """For an embedded caption, the figure part of the same image."""
 
 
 @dataclass
