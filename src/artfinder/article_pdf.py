@@ -1078,7 +1078,7 @@ class ArticlePDF:
         copy_rects: bool = True,
     ) -> list[Rect]:
         """
-        Get drawing rectangles from a specific page.
+        Get drawing bounds, limited by their active clips, from a specific page.
 
         Parameters
         ----------
@@ -2141,7 +2141,7 @@ class ArticlePDF:
         region = Rect(rect) * self._page(page_index).derotation_matrix
         region.normalize()
         for drawing in self._drawings_cache[page_index]:
-            bounds = drawing.rect
+            bounds = drawing.visible_rect
             if (
                 bounds.x0 <= region.x1
                 and bounds.x1 >= region.x0
@@ -2588,11 +2588,9 @@ class ArticlePDF:
         else:
             blocks = req_blocks[page_no]
         for block in blocks:
-            if clip is None or clip.contains(block.rect):
-                if copy_rects:
-                    result.append(copy(block.rect))
-                else:
-                    result.append(block.rect)
+            rect = block.visible_rect if isinstance(block, DrawingObjectPDF) else block.rect
+            if clip is None or clip.contains(rect):
+                result.append(copy(rect) if copy_rects else rect)
         if rect_type in {"_figure_captions", "_table_captions"}:
             for captions in req_blocks.values():
                 for caption in captions:
@@ -3252,11 +3250,11 @@ class ArticlePDF:
 
     def _get_drawing_objs_from_page(self, page_no: int) -> tuple[DrawingObjectPDF, ...]:
         """
-        Internal method to get drawing objects not hidden by an empty clip.
+        Internal method to get drawing objects bounded by their active clips.
 
-        PDF exports can retain a duplicate plot behind an empty clip. Ordinary
-        `get_drawings` returns those hidden paths too, so they enlarge figures
-        despite never being painted. Extended extraction supplies clip scopes;
+        A plotted curve may extend far outside the axes it is clipped to.
+        Ordinary `get_drawings` reports the whole path, so its bounds can
+        bridge separate figures. Extended extraction supplies clip scopes;
         a clip applies only to subsequent records at deeper levels.
 
         Parameters
@@ -3287,10 +3285,21 @@ class ArticlePDF:
                 continue
             if clips:
                 clip = clips[-1][1]
-                # Do not test the path's rect: axes and tick marks
-                # legitimately have zero width or height.
                 if clip.is_empty:
                     continue
+                rect = cast(Rect, dr["rect"])
+                # Rect.intersect leaves zero-area paths unchanged. Clip them
+                # too, but keep valid bounds for axes and tick marks.
+                bounds = Rect(
+                    max(rect.x0, clip.x0), max(rect.y0, clip.y0),
+                    min(rect.x1, clip.x1), min(rect.y1, clip.y1),
+                )
+                if not bounds.is_valid:
+                    continue
+                if bounds != rect:
+                    # Keep the original geometry for component extraction,
+                    # which replays the paths without their clipping scopes.
+                    dr["clipped_rect"] = bounds
             drawings.append(
                 DrawingObjectPDF(**{k: v for k, v in dr.items() if v is not None})
             )
@@ -4992,7 +5001,10 @@ class ArticlePDF:
         # Each candidate goes with the width of the stroke it is painted with:
         # a line of a plot can be drawn thicker than its path is wide.
         candidates = [
-            (copy(drawing.rect), drawing.width if drawing.type in ("s", "fs") else 0.0)
+            (
+                copy(drawing.visible_rect),
+                drawing.width if drawing.type in ("s", "fs") else 0.0,
+            )
             for drawing in self._drawings_cache[page_no]
             if self._is_visible_drawing(drawing)
         ]

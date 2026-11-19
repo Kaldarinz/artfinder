@@ -369,6 +369,14 @@ class DrawingObjectPDF:
     the color parameter is ignored.
     """
 
+    clipped_rect: Rect | None = None
+    """Path bounds limited by the active clip, if it trims the path."""
+
+    @property
+    def visible_rect(self) -> Rect:
+        """Return the path bounds within its clip, when there is one."""
+        return self.rect if self.clipped_rect is None else self.clipped_rect
+
     def __post_init__(self):
         if not isinstance(self.lineCap, int):
             self.lineCap = int(max(self.lineCap))
