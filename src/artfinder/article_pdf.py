@@ -5313,11 +5313,12 @@ class ArticlePDF:
         of text set within `FIGURE_LABEL_GAP` of it whose block can be a label
         (see `_is_figure_label`). A PDF text block can group panel letters from
         neighbouring figures: its empty span between lines must not join them.
-        Left out is text in the body font above a cluster — the
-        heading of the section the figure opens — and, on a two-column page,
-        text across the column gutter from a cluster confined to one column: a
-        panel letter of the figure in the next column can lie nearer to this
-        one than to its own. Clusters too small to be a figure are dropped.
+        Lines belonging to detected tables are also left out: a row of cells
+        can stretch across the page and pull a one-column figure into the
+        opposite column. The cluster also skips text in the body font above it
+        (a section heading) and text across the gutter from a one-column
+        cluster: a panel letter in the next column can lie nearer to this
+        cluster than to its own. Clusters too small to be a figure are dropped.
 
         Parameters
         ----------
@@ -5341,11 +5342,15 @@ class ArticlePDF:
         )
 
         gutter = self._column_gutter_middle(page_no)
+        table_rects = self.get_table_rects(page_no, copy_rects=False)
         labels = [
             (block, line.rect)
             for block in self._text_cache[page_no]
             if self._is_figure_label(block, caption_rects, paragraph_rects)
             for line in block.lines
+            if not any(
+                self._fraction_inside(line.rect, table) > 0.5 for table in table_rects
+            )
         ]
         # A label can bring a cluster within reach of the next label, or of
         # another cluster: a few rounds settle it.
