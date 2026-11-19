@@ -570,5 +570,14 @@
         "12": "Extinction spectra for NPs colloids obtained from pure Cu (a) and pure Al (b) targets by FLASiS in water. Solid and dashed-dotted lines correspond to experimental data and the best fit, respectively. Insets show the Relative Abundance (RA) of the NPs within the samples for each metal. Cu colloids (a) present two populations with total (core-shell) radii of 0.84 nm and 110 nm with RA indicated in the Y left axis and Y right axis respectively. Al colloids (b) present alumina NPs with a size distribution having a modal radius of 10.1 nm.",
         "13": "Extinction spectra for alumina NP of 10 nm radii with Cu inclusions of 1 nm radii for different f values.",
         "14": "Extinction spectra for alumina NP of 20 nm radii with Cu inclusions of 1 nm radii for different f values."
+    },
+    "nanosecond pulsed laser ablation of silicon in liquids.pdf": {
+        "3": "Dependence of the silicon ablation threshold at different shot number, 5 (◦), 10 (•), 50 (▲), 100 (■), and 500 (□) laser pulses, in the DMSO. The solid, long dash, middle dash, small dash, and dotted lines show the ﬁts to (12) with F th (5) = 4. 2 J/cm 2, ω 0 (5) = 140 µm, F th (10) = 4. 0 J/cm 2, ω 0 (10) = 140 µm, F th (50) = 3. 8 J/cm 2, ω 0 (50) = 145 µm, F th (100) = 3. 7 J/cm 2, ω 0 (100) = 150 µm, F th (500) = 3. 4 J/cm 2, ω 0 (500) = 150 µm, respectively",
+        "4": "Dependence of the silicon ablation threshold at different shots number, 5 (◦), 10 (•), 50 (▲), 100 (■), and 500 (□) laser pulses, in the water. The solid, long dash, middle dash, small dash, and dotted lines show the ﬁts to (12) with F th (5) = 4. 8 J/cm 2, ω 0 (5) = 155 µm, F th (10) = 4. 4 J/cm 2, ω 0 (10) = 165 µm, F th (50) = 4. 1 J/cm 2, ω 0 (50) = 165 µm, F th (100) = 3. 9 J/cm 2, ω 0 (100) = 165 µm, F th (500) = 3. 7 J/cm 2, ω 0 (500) = 165 µm, respectively",
+        "5": "Shows the experimental results of the ablation threshold versus the number of laser pulses in the DMSO (▲) and the water (•). The solid and dash lines show the ﬁts to (13) with F th (1) = 4. 4 J/cm 2 and S = 0. 96 in the DMSO and F th (1) = 5. 1 J/cm 2 and S = 0. 94 in the water, respectively",
+        "1a": "Shows SEM image of the irradiated silicon surface morphology under the DMSO by ﬁve 532 nm laser pulses at a ﬂuence of 5 J/cm 2",
+        "1b": "High-magniﬁcation SEM image of irradiated surface morphology of silicon under the DMSO conﬁnement by ﬁve 532 nm laser pulses at a ﬂuence of 5 J/cm 2 indicates cavities several as bubble nucleation sites and some as trapped bubbles",
+        "2a": "Shows SEM image of the irradiated silicon surface morphology underwater by ﬁve 532 nm laser pulses at a ﬂuence of 7 J/cm 2",
+        "2b": "High-magniﬁcation SEM image of irradiated surface morphology of silicon underwater by ﬁve 532 nm laser pulses at a ﬂuence of 7 J/cm 2 indicates cavities several as bubble nucleation sites and some as trapped bubbles"
     }
 }

@@ -65,8 +65,8 @@ class TestFigureCaptions:
             for key in article.figure_captions:
                 assert isinstance(key, str), f"Expected str key, got {type(key)}"
                 assert re.fullmatch(
-                    r"[A-Z]?\d+(?:\.\d+)*", key
-                ), f"Expected a figure label like '1', 'S1' or 'A2.1', got {key!r}"
+                    r"[A-Z]?\d+(?:\.\d+)*[a-rt-z]?", key
+                ), f"Expected a figure label like '1', 'S1', 'A2.1' or '1a', got {key!r}"
 
     def test_figure_captions_values_are_strings(self, pdf_files: list[Path]) -> None:
         """Test that figure_captions values are strings."""

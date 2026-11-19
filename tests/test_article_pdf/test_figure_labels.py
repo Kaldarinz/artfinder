@@ -5,6 +5,7 @@ Tests for ArticlePDF figure labels.
 import re
 from statistics import median
 
+import pymupdf
 import pytest
 from pathlib import Path
 from pymupdf import Rect
@@ -169,6 +170,25 @@ class TestCaptionLabel:
         """Test that text without a supported figure label is not a caption."""
 
         assert ArticlePDF.CAPTION_PATTERN.match(text) is None
+
+
+@pytest.mark.parametrize(
+    ("label_font", "text_font", "expected"),
+    [("hebo", "helv", {"2a": "Shows the setup."}), ("helv", "helv", {}), ("hebo", "hebo", {})],
+)
+def test_panel_caption_requires_a_distinct_label(
+    label_font: str, text_font: str, expected: dict[str, str]
+) -> None:
+    """Accept a separately styled panel label, not a reference in uniform text."""
+
+    with pymupdf.open() as document:
+        page = document.new_page()
+        page.insert_text((50, 200), "Fig. 02A ", fontname=label_font, fontsize=10)
+        x = 50 + pymupdf.get_text_length("Fig. 02A ", fontname=label_font, fontsize=10)
+        page.insert_text((x, 200), "Shows the setup.", fontname=text_font, fontsize=10)
+        pdf = document.tobytes()
+    with ArticlePDF(pdf, identifier="panel-caption") as article:
+        assert article.figure_captions == expected
 
 
 class TestSupplementaryFigures:

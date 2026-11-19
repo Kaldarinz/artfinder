@@ -6,8 +6,8 @@ extracting figures, captions, and analyzing document structure.
 
 A figure is identified by its caption label rather than by a number: `"1"` for
 `Figure 1`, `"S1"` for `Figure S1`, `Fig. S1` or `Supplementary Figure 1`,
-and `"A2.1"` for `Figure A2.1`. Letter prefixes and dotted numbers are preserved,
-keeping main-text, supplementary and appendix figures distinct.
+`"A2.1"` for `Figure A2.1`, and `"1a"` for a separately captioned `Fig. 1a`.
+Letter prefixes, dotted numbers and panel letters keep these figures distinct.
 """
 
 import html
@@ -71,7 +71,7 @@ class ArticlePDF:
     structure (columns, paragraphs), and identifying document headers.
 
     Figures are composed of vector graphics (drawings) and raster images and text elements.
-    Every figure is keyed by its label, e.g. `1`, `S1`, `A6` or `A2.1`.
+    Every figure is keyed by its label, e.g. `1`, `S1`, `A2.1` or `1a`.
     Letter prefixes are uppercased, dotted numeric components are preserved,
     and leading zeros are dropped. Supplementary words or a trailing `S`
     supply an `S` prefix when the caption has no explicit letter prefix.
@@ -175,16 +175,17 @@ class ArticlePDF:
     WHITE_LEVEL = 0.97
     """Lowest value every component of a colour must reach for it to be taken
     as white, which leaves a drawing painted in it invisible on the page."""
-    _CAPTION_LABEL_PATTERN = (
-        r"(?:(?P<prefix>[A-Z])\s?)?(?P<number>\d+(?:\.\d+)*)"
-        r"(?P<suffix>S)?(?!\w|\.\d)[^\w(\[]*"
-    )
+    _CAPTION_NUMBER_PATTERN = r"(?:(?P<prefix>[A-Z])\s?)?(?P<number>\d+(?:\.\d+)*)"
+    _CAPTION_LABEL_END = r"(?!\w|\.\d)[^\w(\[]*"
+    _CAPTION_LABEL_PATTERN = rf"{_CAPTION_NUMBER_PATTERN}(?P<suffix>S)?{_CAPTION_LABEL_END}"
     """Shared label grammar: an optional letter and dot-separated numbers.
     The boundary also prevents backtracking to a shorter label in `A2.1a`."""
-    CAPTION_PATTERN = re.compile(
+    _FIGURE_CAPTION_START = (
         r"^\s*(?:(?P<supp>supplementary|supplemental|supporting)\s+)?"
-        rf"Fig(?:ure)?(?:\.\s*|\s+){_CAPTION_LABEL_PATTERN}",
-        re.IGNORECASE,
+        r"Fig(?:ure)?(?:\.\s*|\s+)"
+    )
+    CAPTION_PATTERN = re.compile(
+        rf"{_FIGURE_CAPTION_START}{_CAPTION_LABEL_PATTERN}", re.IGNORECASE
     )
     """Pattern of a figure caption opening, e.g. `Fig. 1`, `Figure S2.`,
     `Figure 2S.`, `Supplementary Figure 3` or `Figure A2.1`.
@@ -193,7 +194,13 @@ class ArticlePDF:
     The `prefix` group holds an appendix or supplementary letter, `number`
     holds the numeric components, and `supp` and `suffix` mark supplementary
     figures. A label run into a letter is not an opening: `Figure 1a shows`
-    starts a paragraph referring to a panel, set in the same font as a caption."""
+    can be a body reference. See `_caption_opening` for separately captioned panels."""
+    # Keep trailing S reserved for supplementary figures, not panel letters.
+    _PANEL_CAPTION_PATTERN = re.compile(
+        rf"{_FIGURE_CAPTION_START}{_CAPTION_NUMBER_PATTERN}"
+        rf"(?P<panel>[A-RT-Z]){_CAPTION_LABEL_END}",
+        re.IGNORECASE,
+    )
     TABLE_CAPTION_PATTERN = re.compile(
         r"^\s*(?:(?P<supp>supplementary|supplemental|supporting)\s+)?"
         rf"Table\s+{_CAPTION_LABEL_PATTERN}",
@@ -2699,9 +2706,9 @@ class ArticlePDF:
         """
 
         for i, line in enumerate(block.lines):
-            text = line.text.strip()
             if not (
-                cls.CAPTION_PATTERN.match(text) or cls.TABLE_CAPTION_PATTERN.match(text)
+                cls._caption_opening(line, cls.CAPTION_PATTERN)
+                or cls.TABLE_CAPTION_PATTERN.match(line.text.strip())
             ):
                 continue
             if not i:
@@ -3539,10 +3546,51 @@ class ArticlePDF:
         width_max = largest_cluster[("width", "max")]
         return Size(mean=width_mean, min=width_min, max=width_max)
 
+    @classmethod
+    def _caption_opening(
+        cls, line: TextLinePDF, pattern: re.Pattern[str], text: str | None = None
+    ) -> re.Match[str] | None:
+        """
+        Match an opening, admitting panel labels only when set apart in bold.
+
+        A bare `Figure 2a shows ...` can be a paragraph referring to a panel.
+        A bold `Fig. 2a` followed by regular text is a separately set caption.
+
+        Parameters
+        ----------
+        line : TextLinePDF
+            Opening line carrying the font information.
+        pattern : re.Pattern[str]
+            Ordinary figure or table caption pattern.
+        text : str | None, default=None
+            Text to match, when matching the entire block rather than the line.
+
+        Returns
+        -------
+        re.Match[str] | None
+            The matched opening, if any.
+        """
+
+        if text is None:
+            text = line.text.strip()
+        match = pattern.match(text)
+        if match is not None or pattern is not cls.CAPTION_PATTERN:
+            return match
+        panel = cls._PANEL_CAPTION_PATTERN.match(text)
+        if panel is not None:
+            bold: list[str] = []
+            for span in line.spans:
+                if not span.text.strip():
+                    continue
+                if not span.flags & pymupdf.TEXT_FONT_BOLD:
+                    return panel if cls._PANEL_CAPTION_PATTERN.fullmatch(" ".join(bold)) else None
+                bold.append(span.text)
+        return None
+
     @staticmethod
     def _caption_label(match: re.Match[str]) -> str:
         """
-        Build a figure label from a `CAPTION_PATTERN` match.
+        Build a canonical label from a caption opening.
 
         Each numeric component loses its leading zeros, and an explicit letter
         prefix is uppercased and preserved. Without one, a supplementary word
@@ -3553,19 +3601,21 @@ class ArticlePDF:
         Parameters
         ----------
         match : re.Match[str]
-            A match of `CAPTION_PATTERN`.
+            A figure, panel or table caption opening.
 
         Returns
         -------
         str
-            Figure label, e.g. `1`, `S1` or `A2.1`.
+            Caption label, e.g. `1`, `S1`, `A2.1` or `1a`.
         """
 
+        groups = match.groupdict()
         prefix = (match.group("prefix") or "").upper()
-        if not prefix and (match.group("supp") or match.group("suffix")):
+        if not prefix and (match.group("supp") or groups.get("suffix")):
             prefix = "S"
         number = ".".join(str(int(part)) for part in match.group("number").split("."))
-        return f"{prefix}{number}"
+        panel = (groups.get("panel") or "").lower()
+        return f"{prefix}{number}{panel}"
 
     @staticmethod
     def _normalize_caption_whitespace(text: str) -> str:
@@ -3940,7 +3990,7 @@ class ArticlePDF:
         """
 
         for i, line in enumerate(block.lines):
-            if pattern.match(line.text.strip()):
+            if cls._caption_opening(line, pattern):
                 if i and all(
                     abs(previous.rect.y0 - line.rect.y0) < 1
                     and previous.rect.intersects(line.rect)
@@ -3990,7 +4040,7 @@ class ArticlePDF:
         if (
             caption.text.rstrip().endswith((".", "!", "?"))
             or not following_text[:1].islower()
-            or cls.CAPTION_PATTERN.match(following_text)
+            or cls._caption_opening(following.lines[0], cls.CAPTION_PATTERN)
             or cls.TABLE_CAPTION_PATTERN.match(following_text)
         ):
             return False
@@ -4093,7 +4143,7 @@ class ArticlePDF:
                                 TextBlockPDF(rect=line.rect, lines=[line])
                             ) != font
                             or abs(gap - pitch) > max(1, self.LINE_PITCH_TOLERANCE * pitch)
-                            or self.CAPTION_PATTERN.match(line.text.strip())
+                            or self._caption_opening(line, self.CAPTION_PATTERN)
                             or self.TABLE_CAPTION_PATTERN.match(line.text.strip())
                         ):
                             break
@@ -4104,8 +4154,8 @@ class ArticlePDF:
                     break
                 if extra:
                     text = self._join_caption_lines(lines + extra)
-                    opening = self.CAPTION_PATTERN.match(
-                        text
+                    opening = self._caption_opening(
+                        lines[0], self.CAPTION_PATTERN, text
                     ) or self.TABLE_CAPTION_PATTERN.match(text)
                     if opening is not None:
                         updated = replace(
@@ -4153,7 +4203,10 @@ class ArticlePDF:
             while i < num_blocks:
                 block = self._strip_overlaid_caption_title(text_blocks[i], pattern)
                 text = block.text.strip()
-                match = pattern.match(text)
+                match = (
+                    self._caption_opening(block.lines[0], pattern, text)
+                    if text else None
+                )
                 # The opening itself can be split into blocks: Elsevier sets
                 # `Fig.` in a block of its own and starts the next one with
                 # `10.` on the same line. The pieces are joined when the
@@ -4342,7 +4395,7 @@ class ArticlePDF:
                     # Assemble clean caption text (whitespace-normalized,
                     # line-wrap hyphens resolved) and remove the matched pattern.
                     clean_text = self._join_caption_lines(block.lines)
-                    clean_match = pattern.match(clean_text)
+                    clean_match = match.re.match(clean_text)
                     text = (
                         clean_text[clean_match.end() :].strip()
                         if clean_match is not None
@@ -5421,11 +5474,10 @@ class ArticlePDF:
         the next figure starts right under it — and taking the nearest would
         leave the other caption with none. Each figure then takes in the clusters no
         caption claimed that lie within the absolute or scale-aware panel gap
-        (see `_within_figure_panel_gap`), provided it covers no text, other
-        figure or page furniture in doing so — the panels
-        of a figure set further apart than `FIGURE_GRAPHICS_GAP`. A caption
-        whose figure sits at the foot of the previous page takes part in
-        neither.
+        (see `_within_figure_panel_gap`), without taking graphics across the
+        gutter from both its figure and caption or covering text, other figures
+        or page furniture. A caption whose figure sits at the foot of the
+        previous page takes part in neither.
 
         Parameters
         ----------
@@ -5500,9 +5552,14 @@ class ArticlePDF:
                     continue
                 nearest: tuple[float, int] | None = None
                 for caption_index, figure in figures.items():
+                    caption_rect = captions[caption_index].rect
+                    if self._across_column_gutter(
+                        figure.reach, cluster.reach, gutter
+                    ) and self._across_column_gutter(caption_rect, cluster.reach, gutter):
+                        continue
                     gap = self._gap_between(figure.reach, cluster.reach)
                     if not self._within_figure_panel_gap(
-                        figure.reach, cluster.reach, captions[caption_index].rect
+                        figure.reach, cluster.reach, caption_rect
                     ):
                         continue
                     span = self._span(figure.reach, cluster.reach)
