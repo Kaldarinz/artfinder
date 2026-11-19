@@ -5385,8 +5385,63 @@ class ArticlePDF:
             return False
         return (rect.x1 <= gutter) != (other.x0 + other.x1 <= 2 * gutter)
 
+    def _has_side_caption_marker(
+        self, page_no: int, figure: Rect, caption: FigureCaptionPDF
+    ) -> bool:
+        """
+        Check for a directional glyph beside the caption opening.
+
+        A triangle or arrow in the gutter can explicitly point from a caption
+        to a figure in the next column. It must be between the pair and close
+        to the caption, not a symbol anywhere in the facing column. Use its
+        baseline to locate the row: a symbol font can have a much taller box
+        than the glyph it draws.
+
+        Parameters
+        ----------
+        page_no : int
+            Page holding both the caption and the figure.
+        figure : Rect
+            Bounds of the candidate graphics cluster.
+        caption : FigureCaptionPDF
+            Caption to test for a marker.
+
+        Returns
+        -------
+        bool
+            Whether a nearby glyph points at the figure beside the caption.
+        """
+
+        rect = caption.rect
+        if not self._is_beside(figure, rect):
+            return False
+        if rect.x1 <= figure.x0:
+            left, right, edge = rect.x1, figure.x0, rect.x1
+            markers = ("▸", "▶", "►", "→")
+        elif figure.x1 <= rect.x0:
+            left, right, edge = figure.x1, rect.x0, rect.x0
+            markers = ("◂", "◀", "◄", "←")
+        else:
+            return False
+
+        em = caption.font_props[-1]
+        top = max(figure.y0, rect.y0)
+        bottom = min(figure.y1, rect.y1, rect.y0 + 2 * em)
+        return any(
+            span.alpha > 0
+            and span.text.strip() in markers
+            and top <= span.origin[1] <= bottom
+            and left <= (x := (span.rect.x0 + span.rect.x1) / 2) <= right
+            and abs(x - edge) <= em
+            for block in self._text_cache[page_no]
+            for line in block.lines
+            for span in line.spans
+        )
+
     @staticmethod
-    def _is_separated(rect: Rect, other: Rect, obstacles: Iterable[Rect]) -> bool:
+    def _is_separated(
+        rect: Rect, other: Rect, obstacles: Iterable[Rect], *, same_row: bool = False
+    ) -> bool:
         """
         Internal method to tell whether text stands between two rectangles.
 
@@ -5398,15 +5453,21 @@ class ArticlePDF:
             The other rectangle.
         obstacles : Iterable[Rect]
             Paragraphs and captions that can stand between them.
+        same_row : bool, optional
+            Only check the shared row of a marked side caption and its figure.
+            Text below a short caption next to a tall figure is not between them.
 
         Returns
         -------
         bool
-            Whether most of an obstacle touching neither lies in the rectangle
+            Whether most of an obstacle touching neither lies in the area
             spanning both.
         """
 
         span = ArticlePDF._span(rect, other)
+        if same_row:
+            span.y0 = max(rect.y0, other.y0)
+            span.y1 = min(rect.y1, other.y1)
         for obstacle in obstacles:
             if obstacle.intersects(rect) or obstacle.intersects(other):
                 continue
@@ -5505,17 +5566,24 @@ class ArticlePDF:
             if self._figure_rect_on_previous_page(page_no, caption) is not None:
                 continue
             for cluster_index, cluster in enumerate(clusters):
-                # A caption takes the figure set in its own column, never the
-                # one beside it in the next.
-                if self._across_column_gutter(cluster.reach, caption.rect, gutter):
-                    continue
                 distance = self._caption_distance(cluster.reach, caption.rect)
                 if (
                     distance is None
                     or distance > self._max_caption_distance(cluster.reach, caption.rect)
                 ):
                     continue
-                if self._is_separated(cluster.reach, caption.rect, obstacles):
+                # A caption takes the figure in its own column unless a marker
+                # explicitly points to the figure beside it in the next column.
+                across_gutter = self._across_column_gutter(
+                    cluster.reach, caption.rect, gutter
+                )
+                if across_gutter and not self._has_side_caption_marker(
+                    page_no, cluster.reach, caption
+                ):
+                    continue
+                if self._is_separated(
+                    cluster.reach, caption.rect, obstacles, same_row=across_gutter
+                ):
                     continue
                 costs[caption_index, cluster_index] = distance
 
