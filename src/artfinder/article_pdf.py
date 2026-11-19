@@ -55,7 +55,7 @@ from artfinder.dataclasses import (
     TextBlockPDF,
     TextLinePDF,
 )
-from artfinder.doi import DOI_PATTERN, normalize_doi, strip_doi_decorations
+from artfinder.doi import iter_dois_in_text, normalize_doi, strip_doi_decorations
 from artfinder.helpers import (
     clip_to_grid,
 )
@@ -1643,11 +1643,11 @@ class ArticlePDF:
     @classmethod
     def extract_doi_candidates(cls, text: str) -> list[str]:
         """
-        Find every DOI in a piece of text, most complete candidates first.
+        Find DOI candidates in text, including likely line wraps.
 
-        A DOI broken across a line is rejoined before matching, and a candidate that
-        is a strict prefix of another is dropped: a DOI wrapped after its ``.``
-        separator would otherwise yield a valid-looking but truncated prefix.
+        Drop a candidate that is a strict prefix of another: a wrapped DOI can
+        leave a valid-looking but truncated prefix, even when the full DOI is
+        printed elsewhere in the text.
 
         Parameters
         ----------
@@ -1660,17 +1660,7 @@ class ArticlePDF:
             Deduplicated lowercase DOIs in order of appearance.
         """
 
-        # Rejoin a line break inside a DOI. Anchoring on the characters a DOI cannot
-        # end with keeps this from gluing ordinary prose together -- and a blanket
-        # newline strip would let a match run on into the following word, since the
-        # DOI character class contains letters and digits.
-        text = re.sub(r"([./-])[ \t]*\n[ \t]*(?=[-._;()/:A-Za-z0-9])", r"\1", text)
-
-        candidates: list[str] = []
-        for match in DOI_PATTERN.finditer(text):
-            candidate = strip_doi_decorations(match.group())
-            if candidate not in candidates:
-                candidates.append(candidate)
+        candidates = list(dict.fromkeys(iter_dois_in_text(text)))
         return [
             candidate
             for candidate in candidates
@@ -1683,7 +1673,7 @@ class ArticlePDF:
     @classmethod
     def extract_doi_from_text(cls, text: str) -> str | None:
         """
-        Find the first complete DOI in a piece of text.
+        Find the first DOI candidate in a piece of text.
 
         Parameters
         ----------

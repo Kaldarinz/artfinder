@@ -82,6 +82,19 @@ class TestExtractDoiCandidates:
         text = "10.1038/srep25380\nfoo\n10.1038/srep25380\n"
         assert ArticlePDF.extract_doi_candidates(text) == ["10.1038/srep25380"]
 
+    def test_dois_on_adjacent_lines_stay_separate(self) -> None:
+        """A new DOI is not a continuation of the previous one."""
+        text = "10.3456/study.\n10.7890/item-\nB123\n"
+        assert ArticlePDF.extract_doi_candidates(text) == [
+            "10.3456/study",
+            "10.7890/item-b123",
+        ]
+
+    def test_wrapped_doi_with_crlf_and_indentation(self) -> None:
+        """Horizontal whitespace and CRLF do not prevent a real wrap."""
+        text = "doi:10.8910/edition.  \r\n\t2025.17, \r\n"
+        assert ArticlePDF.extract_doi_candidates(text) == ["10.8910/edition.2025.17"]
+
 
 class TestReferencesHeading:
     """Tests for the bibliography guard in ArticlePDF._get_doi."""
@@ -164,7 +177,44 @@ class TestBibliographyGuard:
 
 
 class TestArticlePDFDoi:
-    """End-to-end DOI extraction from a real PDF."""
+    """End-to-end DOI extraction from PDF text."""
+
+    @pytest.mark.parametrize(
+        ("text", "doi"),
+        [
+            (
+                "http://dx.doi.org/10.1007/s00339-014-8293-7.\nPowered by T2R2",
+                "10.1007/s00339-014-8293-7",
+            ),
+            ("doi:10.1345/article.\narchived with permission", "10.1345/article"),
+            ("10.4321/series.\n2024 Edition", "10.4321/series"),
+            ("10.8001/record.\nAbstract", "10.8001/record"),
+            ("10.4321/record-\nMethods", "10.4321/record-"),
+            ("10.5432/path/item/\nTechnical Notes", "10.5432/path/item/"),
+        ],
+    )
+    def test_complete_doi_does_not_consume_prose(self, text: str, doi: str) -> None:
+        """A separator alone is not evidence that a DOI continues."""
+        assert ArticlePDF.extract_doi_from_text(text) == doi
+        with ArticlePDF(_make_pdf([text]), identifier="test") as article:
+            assert article.doi == doi
+
+    @pytest.mark.parametrize(
+        ("text", "doi"),
+        [
+            (WRAPPED_DOI_TEXT, "10.1073/pnas.2208830119"),
+            ("10.4321/series.\n2024.317.\nAvailable online", "10.4321/series.2024.317"),
+            ("10.9876/entry-\nA42\nArticle text", "10.9876/entry-a42"),
+            ("https://doi.org/10.5432/\nMonograph\nArticle text", "10.5432/monograph"),
+            ("10.6543/archive/\nv2-\n019\nArticle text", "10.6543/archive/v2-019"),
+            ("doi:10.\n7890/record", "10.7890/record"),
+        ],
+    )
+    def test_wrapped_doi_is_recovered(self, text: str, doi: str) -> None:
+        """DOI-looking fragments can continue across one or more breaks."""
+        assert ArticlePDF.extract_doi_from_text(text) == doi
+        with ArticlePDF(_make_pdf([text]), identifier="test") as article:
+            assert article.doi == doi
 
     def test_wrapped_doi_in_real_pdf(self) -> None:
         """The PNAS sample resolves to the complete DOI, not the wrapped prefix."""
