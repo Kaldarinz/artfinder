@@ -25,8 +25,9 @@ from itertools import chain
 from math import floor, inf
 from os import PathLike
 from pathlib import Path
-from shutil import which
+from shutil import copymode, which
 from statistics import median
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 from warnings import warn
 
@@ -69,6 +70,8 @@ logger = logging.getLogger(__name__)
 _Component = TypeVar("_Component", DrawingObjectPDF, ImageInfoPDF, TextBlockPDF)
 _Captioned = TypeVar("_Captioned", FigurePDF, TablePDF)
 _FigureLayer = Literal["figure", "vectors", "image", "text"]
+# PyMuPDF exports its encryption constants dynamically.
+_KEEP_ENCRYPTION: int = getattr(pymupdf, "PDF_ENCRYPT_KEEP")
 
 
 class ArticlePDF:
@@ -117,6 +120,8 @@ class ArticlePDF:
     """Resolution `dpi='auto'` rasterizes a figure holding no raster image at.
     Vectors and text carry no resolution of their own to measure, and render
     the more faithfully the higher it is."""
+    _IMAGE_INFO_FLAGS = pymupdf.TEXT_PRESERVE_IMAGES | pymupdf.TEXT_CLIP
+
     MARGIN = 2
     "Margin in points for rectangles."
     MAX_LINE_PITCH = 60.0
@@ -1750,20 +1755,24 @@ class ArticlePDF:
         old_doi = self._extract_doi_from_xmp()
         self.file.set_xml_metadata(self._xmp_with_doi(xmp, old_doi, normalized))
 
+        self.__dict__.pop("doi", None)
         if not in_place:
-            self.file.save(str(dst))
+            self.file.save(str(dst), encryption=_KEEP_ENCRYPTION)
         elif self.file.can_save_incrementally():
             self.file.saveIncr()
         else:
             # A repaired document cannot be appended to, nor rewritten over the
             # file it is read from.
-            data = self.file.tobytes()
-            self.file.close()
-            temp = self.path.with_name(f"{self.path.name}.tmp")
-            temp.write_bytes(data)
-            temp.replace(self.path)
-            self.file = pymupdf.open(str(self.path))
-        self.__dict__.pop("doi", None)
+            target = self.path.resolve()
+            with TemporaryDirectory(dir=target.parent) as directory:
+                temp = Path(directory) / "replacement.pdf"
+                self.file.save(str(temp), encryption=_KEEP_ENCRYPTION)
+                copymode(target, temp)
+                self.file.close()
+                try:
+                    temp.replace(target)
+                finally:
+                    self.file = pymupdf.open(str(target))
 
     @classmethod
     def _subject_with_doi(cls, subject: str, doi: str) -> str:
@@ -2419,20 +2428,20 @@ class ArticlePDF:
         for label, (page_no, figure) in figures.items():
             resolution = self._figure_dpi(page_no, figure) if dpi == "auto" else dpi
             for part in layers:
-                page = self._figure_layer_page(part, page_no, figure, highlight_white)
-                if page is None:
+                pixmap = self._figure_layer_pixmap(part, page_no, figure, resolution, highlight_white)
+                if pixmap is None:
                     continue
                 suffix = "" if part == "figure" else f"_{part}"
                 path = directory / f"{self.identifier}_fig_{label}{suffix}.png"
-                page.get_pixmap(dpi=resolution, clip=figure.rect).save(path, output="PNG")
+                pixmap.save(path, output="PNG")
                 if part == layer:
                     paths[label] = path
         return paths
 
-    def _figure_layer_page(
-        self, layer: _FigureLayer, page_no: int, figure: FigurePDF, highlight_white: bool
-    ) -> Page | None:
-        """Prepare the source page for one PNG.
+    def _figure_layer_pixmap(
+        self, layer: _FigureLayer, page_no: int, figure: FigurePDF, dpi: int, highlight_white: bool
+    ) -> Pixmap | None:
+        """Render a figure or one of its layers in the physical page's orientation.
 
         Parameters
         ----------
@@ -2441,31 +2450,49 @@ class ArticlePDF:
         page_no : int
             Physical page of the selected figure.
         figure : FigurePDF
-            Figure whose components belong in the output.
+            Figure in unrotated page coordinates.
+        dpi : int
+            Output resolution.
         highlight_white : bool
             Outline white fills on copies of the cached drawings.
 
         Returns
         -------
-        Page | None
-            Original page, a page containing only the layer, or None for an empty layer.
+        Pixmap | None
+            Cropped pixels in displayed coordinates, or None for an empty layer.
         """
+        source = self._page(page_no)
+        clip = figure.rect * source.rotation_matrix
         if layer == "figure":
-            return self._page(page_no)
-        if layer == "vectors":
-            drawings = self._components_in_figure(
-                figure, self._drawings_cache[page_no], copy_objects=highlight_white
-            )
-            if highlight_white:
-                for drawing in drawings:
-                    if drawing.fill == (1.0, 1.0, 1.0):
-                        drawing.width = 1
-            return self._make_drawings(drawings) if drawings else None
-        if layer == "image":
-            images = self._components_in_figure(figure, self._images_cache[page_no])
-            return self._make_image(images) if images else None
-        texts = self._components_in_figure(figure, self._text_cache[page_no])
-        return self._make_text(texts) if texts else None
+            return source.get_pixmap(dpi=dpi, clip=clip)
+
+        # Replay components in unrotated coordinates before turning the scratch
+        # page to match the source. Its crop box need not be the size of page 0.
+        with pymupdf.open() as scratch:
+            page = scratch.new_page(width=source.cropbox.width, height=source.cropbox.height)
+            if layer == "vectors":
+                drawings = self._components_in_figure(
+                    figure, self._drawings_cache[page_no], copy_objects=highlight_white
+                )
+                if not drawings:
+                    return None
+                if highlight_white:
+                    for drawing in drawings:
+                        if drawing.fill == (1.0, 1.0, 1.0):
+                            drawing.width = 1
+                self._make_drawings(drawings, page)
+            elif layer == "image":
+                images = self._components_in_figure(figure, self._images_cache[page_no])
+                if not images:
+                    return None
+                self._make_image(images, page, source)
+            else:
+                texts = self._components_in_figure(figure, self._text_cache[page_no])
+                if not texts:
+                    return None
+                self._make_text(texts, page)
+            page.set_rotation(source.rotation)
+            return page.get_pixmap(dpi=dpi, clip=clip)
 
     def mark(
         self,
@@ -2492,74 +2519,27 @@ class ArticlePDF:
         stroke_width : float, default=2.0
             Width of the stroke used for marking.
 
+        Raises
+        ------
+        ValueError
+            If the marked file would overwrite the source PDF.
+
         Returns
         -------
         str
             Path to the saved marked PDF.
-
         """
 
-        if elements is None:
-            elements = "all"
-        if not isinstance(elements, list):
-            elements = [elements]
-
-        if page_number is None:
-            pages = [self._page(i) for i in range(self.file.page_count)]
-        else:
-            pages = [self._page(page_number)]
-
-        for page in pages:
-            rects = []
-            for element in elements:
-                if element not in DocumentElementsPDF:
-                    warn(
-                        f"Unknown document element: '{element}'."
-                        + f" Allowed elements are: {[e.value for e in DocumentElementsPDF]}."
-                    )
-                    elements.remove(element)
-                    continue
-                if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.TEXT]:
-                    rects.extend(self.get_text_rects(page.number, copy_rects=False))
-                if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.DRAWING]:
-                    rects.extend(self.get_drawing_rects(page.number, copy_rects=False))
-                if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.IMAGE]:
-                    rects.extend(self.get_image_rects(page.number, copy_rects=False))
-                if element in [
-                    DocumentElementsPDF.ALL,
-                    DocumentElementsPDF.FIGURE_CAPTION,
-                ]:
-                    rects.extend(
-                        self.get_figure_caption_rects(page.number, copy_rects=False)
-                    )
-                if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.PARAGRAPH]:
-                    rects.extend(
-                        self.get_paragraph_rects(page.number, copy_rects=False)
-                    )
-                if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.HEADER]:
-                    rects.append(self.header_rect)
-                if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.FOOTER]:
-                    if not self.footer_rect.is_empty:
-                        rects.append(self.footer_rect)
-                if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.FIGURE]:
-                    rects.extend(self.get_figure_rects(page.number, copy_rects=False))
-                if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.TABLE]:
-                    rects.extend(
-                        self.get_table_rects(page.number, copy_rects=False)
-                    )
-                if element in [
-                    DocumentElementsPDF.ALL,
-                    DocumentElementsPDF.TABLE_CAPTION,
-                ]:
-                    rects.extend(
-                        self.get_table_caption_rects(page.number, copy_rects=False)
-                    )
-
-            for rect in rects:
-                shape = page.new_shape()
-                shape.draw_rect(rect)
-                shape.finish(color=stroke_color, width=stroke_width)
-                shape.commit()
+        requested = ["all"] if elements is None else (
+            [elements] if isinstance(elements, str) else elements
+        )
+        allowed = {e.value for e in DocumentElementsPDF}
+        elements = []
+        for element in requested:
+            if element in allowed:
+                elements.append(element)
+            else:
+                warn(f"Unknown document element: '{element}'. Allowed elements are: {sorted(allowed)}.")
 
         if output_path is None:
             output_path = Path(f"marked_{self.identifier}").resolve()
@@ -2568,10 +2548,65 @@ class ArticlePDF:
             output_path.mkdir(parents=True, exist_ok=True)
             file_id = self.identifier.split(".pdf")[0]
             output_path = output_path / Path(
-                f"{file_id}_{'_'.join([element for element in elements])}.pdf"
+                f"{file_id}_{'_'.join(elements)}.pdf"
             )
 
-        self.file.save(str(output_path))
+        if hasattr(self, "path") and output_path.exists() and output_path.samefile(self.path):
+            raise ValueError("Cannot write diagnostic marks over the source PDF.")
+
+        # Keep marks out of the live document, its page caches, and later saves.
+        with pymupdf.open(
+            stream=self.file.tobytes(encryption=_KEEP_ENCRYPTION), filetype="pdf"
+        ) as marked:
+            pages = range(self.file.page_count) if page_number is None else (page_number,)
+            for index in pages:
+                page = marked[index]
+                page_no = page.number
+                rects = []
+                for element in elements:
+                    if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.TEXT]:
+                        rects.extend(self.get_text_rects(page_no, copy_rects=False))
+                    if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.DRAWING]:
+                        rects.extend(self.get_drawing_rects(page_no, copy_rects=False))
+                    if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.IMAGE]:
+                        rects.extend(self.get_image_rects(page_no, copy_rects=False))
+                    if element in [
+                        DocumentElementsPDF.ALL,
+                        DocumentElementsPDF.FIGURE_CAPTION,
+                    ]:
+                        rects.extend(
+                            self.get_figure_caption_rects(page_no, copy_rects=False)
+                        )
+                    if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.PARAGRAPH]:
+                        rects.extend(
+                            self.get_paragraph_rects(page_no, copy_rects=False)
+                        )
+                    if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.HEADER]:
+                        rects.append(self.header_rect)
+                    if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.FOOTER]:
+                        if not self.footer_rect.is_empty:
+                            rects.append(self.footer_rect)
+                    if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.FIGURE]:
+                        rects.extend(self.get_figure_rects(page_no, copy_rects=False))
+                    if element in [DocumentElementsPDF.ALL, DocumentElementsPDF.TABLE]:
+                        rects.extend(
+                            self.get_table_rects(page_no, copy_rects=False)
+                        )
+                    if element in [
+                        DocumentElementsPDF.ALL,
+                        DocumentElementsPDF.TABLE_CAPTION,
+                    ]:
+                        rects.extend(
+                            self.get_table_caption_rects(page_no, copy_rects=False)
+                        )
+
+                for rect in rects:
+                    shape = page.new_shape()
+                    shape.draw_rect(rect)
+                    shape.finish(color=stroke_color, width=stroke_width)
+                    shape.commit()
+
+            marked.save(str(output_path), encryption=_KEEP_ENCRYPTION)
         return str(output_path)
 
     # Private methods
@@ -3405,9 +3440,7 @@ class ArticlePDF:
         page = self._page(page_no)
         page_area = abs(page.rect)
         # What `Page.get_image_info(hashes=True, xrefs=True)` does, with clipping.
-        textpage = page.get_textpage(
-            flags=pymupdf.TEXT_PRESERVE_IMAGES | pymupdf.TEXT_CLIP
-        )
+        textpage = page.get_textpage(flags=self._IMAGE_INFO_FLAGS)
         infos = cast(list[dict], textpage.extractIMGINFO(hashes=True))
         xrefs = {
             Pixmap(self.file, item[0]).digest: item[0]
@@ -3437,9 +3470,10 @@ class ArticlePDF:
             if abs(image.rect) < page_area * self.MAX_IMAGE_AREA
         )
 
+    @staticmethod
     def _make_drawings(
-        self, drawings: Iterable[DrawingObjectPDF], page: Page | None = None
-    ) -> Page:
+        drawings: Iterable[DrawingObjectPDF], page: Page
+    ) -> None:
         """
         Internal method to render drawing objects.
 
@@ -3447,25 +3481,15 @@ class ArticlePDF:
         ----------
         drawings : Iterable[DrawingObjectPDF]
             Drawing objects to render.
-        page : Page | None
-            Page to render drawings on. If None, creates a new blank page.
+        page : Page
+            Scratch page to render drawings on.
 
         Raises
         ------
         ValueError
             If a drawing contains an unknown drawing item type.
-
-        Returns
-        -------
-        Page
-            Page with rendered drawings.
         """
 
-        if page is None:
-            outpdf = pymupdf.open()
-            page = outpdf.new_page(
-                width=self._page(0).rect.width, height=self._page(0).rect.height
-            )
         shape = page.new_shape()
         for drawing in drawings:
             for item in drawing.items:
@@ -3481,11 +3505,11 @@ class ArticlePDF:
                     raise ValueError(f"Unknown drawing item type: {item[0]}")
             shape.finish(**drawing.finishing_opts())
         shape.commit()
-        return page
 
+    @staticmethod
     def _make_text(
-        self, text_blocks: Iterable[TextBlockPDF], page: Page | None = None
-    ) -> Page:
+        text_blocks: Iterable[TextBlockPDF], page: Page
+    ) -> None:
         """
         Internal method to render text objects.
 
@@ -3493,55 +3517,40 @@ class ArticlePDF:
         ----------
         text_blocks : Iterable[TextBlockPDF]
             Text blocks to render.
-        page : Page | None
-            Page to render text on. If None, creates a new blank page.
-
-        Returns
-        -------
-        Page
-            Page with rendered text.
+        page : Page
+            Scratch page to render text on.
         """
 
-        if page is None:
-            outpdf = pymupdf.open()
-            page = outpdf.new_page(
-                width=self._page(0).rect.width, height=self._page(0).rect.height
-            )
         shape = page.new_shape()
         for block in text_blocks:
             for text_span in block.insert_text_dicts():
                 shape.insert_text(**text_span)
         shape.commit()
-        return page
 
-    def _make_image(
-        self, images: Iterable[ImageInfoPDF], page: Page | None = None
-    ) -> Page:
-        """
-        Internal method to render image objects.
+    def _make_image(self, images: Iterable[ImageInfoPDF], page: Page, source: Page) -> None:
+        """Replay image placements, including inline images with no PDF xref.
 
         Parameters
         ----------
         images : Iterable[ImageInfoPDF]
-            Image objects to render.
-        page : Page | None
-            Page to render images on. If None, creates a new blank page.
-
-        Returns
-        -------
-        Page
-            Page with rendered images.
+            Selected images from the source page.
+        page : Page
+            Unrotated scratch page to draw on.
+        source : Page
+            Page owning the image blocks.
         """
-
-        if page is None:
-            outpdf = pymupdf.open()
-            page = outpdf.new_page(
-                width=self._page(0).rect.width, height=self._page(0).rect.height
-            )
+        inline: dict[int, dict] | None = None
         for image in images:
-            image_pm = Pixmap(self.file, image.xref)
-            page.insert_image(image.rect, pixmap=image_pm)
-        return page
+            if image.xref:
+                page.insert_image(image.rect, pixmap=Pixmap(self.file, image.xref))
+                continue
+            if inline is None:
+                # Match extractIMGINFO's block numbers with identical layout flags.
+                # Only materialize payloads when a selected image has no xref.
+                blocks = source.get_text("dict", flags=self._IMAGE_INFO_FLAGS)["blocks"]
+                inline = {b["number"]: b for b in blocks if b["type"] == 1}
+            block = inline[image.number]
+            page.insert_image(image.rect, stream=block["image"], mask=block.get("mask"))
 
     def _calc_paragraph_width(self, eps: float = 4.0) -> Size:
         """
@@ -3894,50 +3903,52 @@ class ArticlePDF:
         }
         raster_labels: set[str] = set()
         recovered: dict[int, list[FigureCaptionPDF]] = {}
-        for page_no in range(self.file.page_count):
-            page = self._page(page_no)
-            # Header/footer detection uses native text and images, not captions.
-            for image in self.get_image_rects(page_no, copy_rects=False):
-                if (
-                    min(image.width, image.height) < self.MIN_FIGURE_SIDE
-                    or image.intersects(self.header_rect)
-                    or image.intersects(self.footer_rect)
-                    or any(
-                        self._gap_between(image, caption.rect) <= self.FIGURE_LABEL_GAP
-                        for caption in clear[page_no]
-                    )
-                ):
-                    continue
-                try:
-                    raster = read_raster_caption(
-                        page, image, executable,
-                        lambda text: self._raster_caption_opening(text) is not None,
-                    )
-                except subprocess.TimeoutExpired:
-                    logger.debug(f"Raster caption OCR timed out on page {page_no + 1}")
-                    continue
-                except (OSError, subprocess.CalledProcessError) as exc:
-                    logger.debug(f"Raster caption OCR unavailable: {exc}")
-                    return captions
-                if raster is None or any(
-                    block.rect.intersects(raster.rect) for block in self._text_cache[page_no]
-                ):
-                    continue
-                match = self._raster_caption_opening(raster.text)
-                if match is None:
-                    continue
-                label = self._caption_label(match)
-                text = self._normalize_caption_whitespace(raster.text[match.end():])
-                if label in clear_labels or label in raster_labels or not text:
-                    continue
-                raster_labels.add(label)
-                recovered.setdefault(page_no, []).append(
-                    FigureCaptionPDF(
-                        matched_pattern=match.group(), label=label, text=text,
-                        font_props=(0, 0, "", 0.0), lines_no=raster.lines_no,
-                        rect=raster.rect, raster_figure_rect=raster.figure_rect,
-                    )
+        images = (
+            (page_no, image)
+            for page_no in range(self.file.page_count)
+            for image in self.get_image_rects(page_no, copy_rects=False)
+        )
+        for page_no, image in images:
+            if (
+                min(image.width, image.height) < self.MIN_FIGURE_SIDE
+                or image.intersects(self.header_rect)
+                or image.intersects(self.footer_rect)
+                or any(
+                    self._gap_between(image, caption.rect) <= self.FIGURE_LABEL_GAP
+                    for caption in clear[page_no]
                 )
+            ):
+                continue
+            try:
+                raster = read_raster_caption(
+                    self._page(page_no), image, executable,
+                    lambda text: self._raster_caption_opening(text) is not None,
+                )
+            except subprocess.TimeoutExpired:
+                logger.debug(f"Raster caption OCR timed out on page {page_no + 1}")
+                continue
+            except (OSError, subprocess.CalledProcessError) as exc:
+                logger.debug(f"Raster caption OCR unavailable: {exc}")
+                break  # Merge captions recovered before the OCR engine failed.
+            if raster is None or any(
+                block.rect.intersects(raster.rect) for block in self._text_cache[page_no]
+            ):
+                continue
+            match = self._raster_caption_opening(raster.text)
+            if match is None:
+                continue
+            label = self._caption_label(match)
+            text = self._normalize_caption_whitespace(raster.text[match.end():])
+            if label in clear_labels or label in raster_labels or not text:
+                continue
+            raster_labels.add(label)
+            recovered.setdefault(page_no, []).append(
+                FigureCaptionPDF(
+                    matched_pattern=match.group(), label=label, text=text,
+                    font_props=(0, 0, "", 0.0), lines_no=raster.lines_no,
+                    rect=raster.rect, raster_figure_rect=raster.figure_rect,
+                )
+            )
         if not recovered:
             return captions
         for page_no, page_captions in captions.items():

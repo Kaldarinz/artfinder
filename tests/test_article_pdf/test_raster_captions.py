@@ -1,11 +1,14 @@
 """Regression tests for figure captions printed as pixels instead of text."""
 
 from pathlib import Path
+from subprocess import CalledProcessError
+from unittest.mock import patch
 
 import pymupdf
 import pytest
 from pymupdf import Rect
 
+from artfinder._raster_captions import RasterCaption
 from artfinder.article_pdf import ArticlePDF
 
 
@@ -56,6 +59,26 @@ def test_ignores_raster_plot_annotation(tmp_path: Path, tesseract: None) -> None
     _raster_pdf(pdf, annotation=True)
     with ArticlePDF(pdf) as article:
         assert not article.figure_captions
+
+
+@pytest.mark.parametrize("error", [OSError("unavailable"), CalledProcessError(1, "tesseract")])
+def test_late_ocr_failure_preserves_captions(error: Exception) -> None:
+    """A later OCR failure must not discard either native or recovered captions."""
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        for y in (150, 400):
+            page.insert_image(Rect(100, y, 260, y + 120),
+                              stream=b"P6\n2 2\n255\n" + b"\x00\xff\x00" * 4)
+        page = doc.new_page()
+        page.draw_rect(Rect(80, 200, 250, 300), fill=(0, 1, 0))
+        page.insert_text((80, 320), "Figure 2. Native.")
+        data = doc.tobytes()
+    first = RasterCaption("Figure 1. Recovered.", Rect(100, 245, 260, 270),
+                          1, Rect(100, 150, 260, 240))
+    with ArticlePDF(data, identifier="ocr-error") as article, patch(
+        "artfinder.article_pdf.which", return_value="tesseract"
+    ), patch("artfinder.article_pdf.read_raster_caption", side_effect=[first, error]):
+        assert article.figure_captions == {"1": "Recovered.", "2": "Native."}
 
 
 def test_no_tesseract_still_extracts_native(
