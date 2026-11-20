@@ -2666,6 +2666,37 @@ class ArticlePDF:
             for component in self._components_in_figure(figure, cache[page], copy_objects)
         ]
 
+    @staticmethod
+    def _text_layout(page: Page) -> pymupdf.TextPage:
+        """Choose a layout that avoids serializing images without losing text breaks.
+
+        Parameters
+        ----------
+        page : Page
+            Page to extract.
+
+        Returns
+        -------
+        pymupdf.TextPage
+            The image-free layout if its text blocks agree with the native layout,
+            otherwise the native layout.
+        """
+        native = page.get_textpage(flags=pymupdf.TEXTFLAGS_DICT)
+        blocks = native.extractBLOCKS()  # Image descriptions, not image bytes.
+        if not any(b[6] == 1 for b in blocks):
+            return native
+
+        text_only = page.get_textpage(
+            flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES
+        )
+        # An intervening image can separate adjacent lines. Compare ordered
+        # (bbox, text including line breaks), ignoring the block numbers that
+        # count the images too. Only pay for native image payloads on mismatch.
+        native_text = [b[:5] for b in blocks if b[6] == 0]
+        if native_text == [b[:5] for b in text_only.extractBLOCKS()]:
+            return text_only
+        return native
+
     def _get_raw_text_blocks_from_page(self, page_no: int) -> tuple[TextBlockPDF, ...]:
         """
         Internal method to get all non blank text blocks from a page.
@@ -2687,7 +2718,7 @@ class ArticlePDF:
         result: list[TextBlockPDF] = []
         text_blocks = [
             TextBlockPDF.from_dict(block)
-            for block in self._page(page_no).get_text(option="dict")["blocks"]
+            for block in self._text_layout(self._page(page_no)).extractDICT()["blocks"]
             if block["type"] == 0
         ]
         for block in text_blocks:
