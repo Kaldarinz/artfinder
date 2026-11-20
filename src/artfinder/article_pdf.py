@@ -15,6 +15,7 @@ import logging
 import re
 import subprocess
 import unicodedata
+from bisect import bisect_right
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from copy import copy, deepcopy
@@ -5048,6 +5049,8 @@ class ArticlePDF:
             Indices into `drawing_rects` of the pieces of such frames.
         """
 
+        if not text_rects:
+            return set()
         pieces = [
             i
             for i, rect in enumerate(drawing_rects)
@@ -5063,9 +5066,26 @@ class ArticlePDF:
                 i = parent[i]
             return i
 
-        for n, i in enumerate(pieces):
-            for j in pieces[n + 1 :]:
-                if self._gap_between(drawing_rects[i], drawing_rects[j]) <= self.MARGIN:
+        # Sweep along the axis with fewer overlapping intervals. A stack of
+        # horizontal strokes is cheap along y, but all-pairs along x (and vice versa).
+        def sweep_cost(intervals: list[tuple[float, float, int]]) -> int:
+            starts = [start for start, _, _ in intervals]
+            # Count later starts within reach; earlier starts add the same
+            # constant to both axes, so need not be subtracted.
+            return sum(bisect_right(starts, end + self.MARGIN) for _, end, _ in intervals)
+
+        intervals = min(
+            sorted((drawing_rects[i].x0, drawing_rects[i].x1, i) for i in pieces),
+            sorted((drawing_rects[i].y0, drawing_rects[i].y1, i) for i in pieces),
+            key=sweep_cost,
+        )
+        for n, (_, end, i) in enumerate(intervals):
+            rect = drawing_rects[i]
+            for pos in range(n + 1, len(intervals)):
+                start, _, j = intervals[pos]
+                if start - end > self.MARGIN:
+                    break
+                if self._gap_between(rect, drawing_rects[j]) <= self.MARGIN:
                     parent[root(i)] = root(j)
         outlines: dict[int, list[int]] = {}
         for i in pieces:
@@ -5693,6 +5713,10 @@ class ArticlePDF:
         """
 
         captions = self._figure_captions_cache[page_no]
+        if not captions:
+            # No local match. A figure captioned on the next page is bounded
+            # separately by _figure_rect_on_previous_page, without these clusters.
+            return {}
         clusters = self._figure_clusters_cache[page_no]
         gutter = self._column_gutter_middle(page_no)
         obstacles = [

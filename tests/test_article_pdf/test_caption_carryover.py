@@ -73,6 +73,9 @@ def test_unclaimed_graphics_can_still_carry_over(
         assert set(figures_by_page[0]) == ({"1", "2"} if preceding_figure else {"2"})
         assert figures_by_page[0]["2"].rect == expected
         assert article._figure_label_to_page_ind["2"] == 0
+        if not preceding_figure:
+            # The previous page supplies the crop but has no local match to make.
+            assert 0 not in article._figure_clusters_cache
 
 
 def test_caption_above_article_page_local_goldens() -> None:

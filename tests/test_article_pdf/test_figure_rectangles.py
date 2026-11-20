@@ -142,6 +142,31 @@ class TestFramePieces:
         found = article._frame_pieces([*self.FRAME, inside], [self.CAPTION])
         assert found == set(range(8))
 
+    @pytest.mark.parametrize("horizontal", [False, True], ids=["vertical", "horizontal"])
+    def test_distant_hairlines_do_not_need_pairwise_checks(
+        self, article: ArticlePDF, monkeypatch: pytest.MonkeyPatch, horizontal: bool
+    ) -> None:
+        """Keep a frame with exact-margin corner gaps among unrelated strokes."""
+        frame = [
+            Rect(20, 2, 20, 18), Rect(2, 0, 18, 0),
+            Rect(0, 2, 0, 18), Rect(2, 20, 18, 20),
+        ]
+        ticks = [
+            Rect(0, p, 20, p) if horizontal else Rect(p, 0, p, 20)
+            for p in range(1000, 20, -10)
+        ]
+        checked = 0
+        gap = article._gap_between
+
+        def counted_gap(rect: Rect, other: Rect) -> float:
+            nonlocal checked
+            checked += 1
+            return gap(rect, other)
+
+        monkeypatch.setattr(article, "_gap_between", counted_gap)
+        assert article._frame_pieces([*frame, *ticks], [Rect(5, 5, 15, 15)]) == set(range(4))
+        assert checked < len(ticks)
+
     def test_figures_sit_above_their_captions(self, article: ArticlePDF) -> None:
         """No figure is taken for the bottom of its frame, just under its caption."""
         assert len(article.figures) == 8
