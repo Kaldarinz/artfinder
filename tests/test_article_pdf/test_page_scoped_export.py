@@ -1,6 +1,7 @@
 """Page-scoped PNG exports when the same caption label appears twice."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pymupdf
 import pytest
@@ -22,9 +23,19 @@ def test_page_scoped_export_with_duplicate_label(tmp_path: Path) -> None:
         pdf = doc.tobytes()
 
     with ArticlePDF(pdf, identifier="dup") as article:
-        paths = article.extract_figures(
-            "1", page_index=0, output_path=tmp_path, extract_bases=True
-        )
+        with patch.object(article, "_located_figures", wraps=article._located_figures) as select:
+            paths = article.extract_figures(
+                "1", page_index=0, output_path=tmp_path, extract_bases=True
+            )
+            select.assert_called_once()
+        standalone = tmp_path / "standalone"
+        for pngs in (
+            article.extract_figure_drawings("1", page_index=0, output_path=standalone),
+            article.extract_figure_images("1", page_index=0, output_path=standalone),
+            article.extract_figure_text("1", page_index=0, output_path=standalone),
+        ):
+            (png,) = pngs
+            assert png.read_bytes() == (tmp_path / png.name).read_bytes()
         # An unscoped request still warns and uses the last occurrence.
         with pytest.warns(UserWarning, match="Duplicate figure label 1"):
             last = article.extract_figures("1", output_path=tmp_path / "all", dpi=72)
@@ -39,3 +50,19 @@ def test_page_scoped_export_with_duplicate_label(tmp_path: Path) -> None:
         assert layer.pixel(x, 108) == color
     text = Pixmap(str(tmp_path / "dup_fig_1_text.png"))
     assert min(text.samples) < 128  # The panel letter, not an empty white crop.
+
+
+def test_empty_export_does_not_create_directory(tmp_path: Path) -> None:
+    """An empty selection warns; an explicitly missing label still raises KeyError."""
+    with pymupdf.open() as doc:
+        doc.new_page()
+        pdf = doc.tobytes()
+    destination = tmp_path / "empty"
+    with ArticlePDF(pdf, identifier="empty") as article:
+        with pytest.warns(UserWarning, match="No figures found"):
+            assert article.extract_figures(output_path=destination) == {}
+        with pytest.warns(UserWarning, match="No figures found"):
+            assert article.extract_figure_text(output_path=destination) == []
+        with pytest.raises(KeyError):
+            article.extract_figures("absent", output_path=destination)
+    assert not destination.exists()

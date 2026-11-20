@@ -43,6 +43,17 @@ class TestTableCaptions:
 
         assert labels == {"S1", "S2"}
 
+    def test_table_selection_by_page_clip_and_copy(self) -> None:
+        """A page and clip select the cached table unless a copy is requested."""
+        with ArticlePDF(CAPTION_ABOVE_PDF) as article:
+            original = article.tables["S1"]
+            page = article._page(article._table_label_to_page_ind["S1"])
+            assert article.get_tables(page, clip=original.rect)["S1"] is original
+            assert not article.get_tables(page, clip=original.caption.rect)
+            copied = article.get_tables(page, clip=original.rect, copy_tables=True)["S1"]
+            assert copied == original
+            assert copied.rect is not original.rect
+
     def test_caption_text_is_kept_whole(self) -> None:
         """Test that a table caption is stitched across blocks like a figure's."""
 
