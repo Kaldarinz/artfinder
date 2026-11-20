@@ -26,7 +26,7 @@ from os import PathLike
 from pathlib import Path
 from shutil import which
 from statistics import median
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 from warnings import warn
 
 import numpy as np
@@ -64,6 +64,8 @@ from artfinder.helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+_Component = TypeVar("_Component", DrawingObjectPDF, ImageInfoPDF, TextBlockPDF)
 
 
 class ArticlePDF:
@@ -1331,35 +1333,51 @@ class ArticlePDF:
             Dictionary of figures keyed by figure label.
         """
 
+        figures = self._located_figures(page_no, clip)
+        return {
+            label: deepcopy(figure) if copy_figures else figure
+            for label, (_, figure) in figures.items()
+        }
+
+    def _located_figures(
+        self,
+        page_no: Page | int | None,
+        clip: Rect | None = None,
+        *,
+        figure_label: str | None = None,
+    ) -> dict[str, tuple[int, FigurePDF]]:
+        """Select figures together with their physical pages, not their caption pages.
+
+        Parameters
+        ----------
+        page_no : Page | int | None
+            Page to search, or None for the whole document.
+        clip : Rect | None
+            If given, keep only figures contained in this rectangle.
+        figure_label : str | None
+            If given, select this label from the search results.
+
+        Returns
+        -------
+        dict[str, tuple[int, FigurePDF]]
+            Physical page index and figure by label. The last duplicate wins.
+        """
         if isinstance(page_no, Page):
             page_no = cast(int, page_no.number)
-
-        pages: Iterable[int]
-        if page_no is None:
-            pages = range(self.file.page_count)
-        else:
-            pages = [page_no]
-
-        result: dict[str, FigurePDF] = {}
+        pages = range(self.file.page_count) if page_no is None else (page_no,)
+        result: dict[str, tuple[int, FigurePDF]] = {}
         for page in pages:
-            figures = self._figures_cache[page]
-            for figure in figures:
+            for figure in self._figures_cache[page]:
                 if clip is not None and not clip.contains(figure.rect):
                     continue
-                fig_label = figure.caption.label
-                # Check for duplicates
-                if fig_label in result:
+                label = figure.caption.label
+                if label in result:
                     warn(
-                        f"Duplicate figure label {fig_label} found on page {page} in {self}. Overwriting."
+                        f"Duplicate figure label {label} found on page {page} in {self}. Overwriting."
                     )
-
-                self._figure_label_to_page_ind[fig_label] = page
-                if copy_figures:
-                    result[fig_label] = deepcopy(figure)
-                else:
-                    result[fig_label] = figure
-
-        return result
+                self._figure_label_to_page_ind[label] = page
+                result[label] = (page, figure)
+        return result if figure_label is None else {figure_label: result[figure_label]}
 
     def get_table_rects(
         self,
@@ -1492,14 +1510,8 @@ class ArticlePDF:
             List of drawing objects for the specified figure(s).
         """
 
-        return cast(
-            "list[DrawingObjectPDF]",
-            self._get_figure_component_by_type(
-                figure_label=figure_label,
-                page_index=page_index,
-                component_type="drawings",
-                copy_objects=copy_objects,
-            ),
+        return self._get_figure_components(
+            self._drawings_cache, figure_label, page_index, copy_objects
         )
 
     def get_figure_images(
@@ -1526,14 +1538,8 @@ class ArticlePDF:
             List of image objects for the specified figure(s).
         """
 
-        return cast(
-            "list[ImageInfoPDF]",
-            self._get_figure_component_by_type(
-                figure_label=figure_label,
-                page_index=page_index,
-                component_type="images",
-                copy_objects=copy_objects,
-            ),
+        return self._get_figure_components(
+            self._images_cache, figure_label, page_index, copy_objects
         )
 
     def get_figure_texts(
@@ -1560,14 +1566,8 @@ class ArticlePDF:
             List of text blocks for the specified figure(s).
         """
 
-        return cast(
-            "list[TextBlockPDF]",
-            self._get_figure_component_by_type(
-                figure_label=figure_label,
-                page_index=page_index,
-                component_type="text",
-                copy_objects=copy_objects,
-            ),
+        return self._get_figure_components(
+            self._text_cache, figure_label, page_index, copy_objects
         )
 
     def _get_doi(self) -> str | None:
@@ -2086,7 +2086,7 @@ class ArticlePDF:
             pitch = None
         return groups
 
-    def _figure_dpi(self, figure_label: str) -> int:
+    def _figure_dpi(self, page_index: int, figure: FigurePDF) -> int:
         """
         Resolution to rasterize a figure at, derived from the images it holds.
 
@@ -2098,8 +2098,10 @@ class ArticlePDF:
 
         Parameters
         ----------
-        figure_label : str
-            Label of the figure.
+        page_index : int
+            Page containing the figure.
+        figure : FigurePDF
+            Selected figure on that page.
 
         Returns
         -------
@@ -2107,7 +2109,9 @@ class ArticlePDF:
             DPI to rasterize the figure at.
         """
 
-        raster_dpi = self._raster_dpi(self.get_figure_images(figure_label))
+        raster_dpi = self._raster_dpi(
+            self._components_in_figure(figure, self._images_cache[page_index])
+        )
         return self.VECTOR_FIGURE_DPI if raster_dpi is None else raster_dpi
 
     def region_dpi(self, page_index: int, rect: Rect) -> int:
@@ -2237,9 +2241,7 @@ class ArticlePDF:
 
         output_path = Path(output_path)
 
-        figures = self.get_figures(page_index)
-        if figure_label is not None:
-            figures = {figure_label: figures[figure_label]}
+        figures = self._located_figures(page_index, figure_label=figure_label)
 
         if len(figures) == 0:
             warn("No figures found to extract.")
@@ -2247,10 +2249,10 @@ class ArticlePDF:
 
         paths: list[Path] = []
         output_path.mkdir(parents=True, exist_ok=True)
-        for fig_label in figures:
-            fig_dpi = self._figure_dpi(fig_label) if dpi == "auto" else dpi
-            fig_drawings = self.get_figure_drawings(
-                fig_label, copy_objects=highlight_white
+        for fig_label, (page_ind, figure) in figures.items():
+            fig_dpi = self._figure_dpi(page_ind, figure) if dpi == "auto" else dpi
+            fig_drawings = self._components_in_figure(
+                figure, self._drawings_cache[page_ind], copy_objects=highlight_white
             )
             if fig_drawings:
                 if highlight_white:
@@ -2259,7 +2261,7 @@ class ArticlePDF:
                             drawing.width = 1
                 drawings_page = self._make_drawings(fig_drawings)
                 pixmap = drawings_page.get_pixmap(
-                    dpi=fig_dpi, clip=figures[fig_label].rect
+                    dpi=fig_dpi, clip=figure.rect
                 )
 
                 path = output_path / Path(
@@ -2302,9 +2304,7 @@ class ArticlePDF:
 
         output_path = Path(output_path)
 
-        figures = self.get_figures(page_index)
-        if figure_label is not None:
-            figures = {figure_label: figures[figure_label]}
+        figures = self._located_figures(page_index, figure_label=figure_label)
 
         if len(figures) == 0:
             warn("No figures found to extract.")
@@ -2312,13 +2312,13 @@ class ArticlePDF:
 
         paths: list[Path] = []
         output_path.mkdir(parents=True, exist_ok=True)
-        for fig_label in figures:
-            fig_dpi = self._figure_dpi(fig_label) if dpi == "auto" else dpi
-            figure_texts = self.get_figure_texts(fig_label)
+        for fig_label, (page_ind, figure) in figures.items():
+            fig_dpi = self._figure_dpi(page_ind, figure) if dpi == "auto" else dpi
+            figure_texts = self._components_in_figure(figure, self._text_cache[page_ind])
             if figure_texts:
                 figure_text_page = self._make_text(figure_texts)
                 pixmap = figure_text_page.get_pixmap(
-                    dpi=fig_dpi, clip=figures[fig_label].rect
+                    dpi=fig_dpi, clip=figure.rect
                 )
 
                 path = output_path / Path(f"{self.identifier}_fig_{fig_label}_text.png")
@@ -2359,9 +2359,7 @@ class ArticlePDF:
 
         output_path = Path(output_path)
 
-        figures = self.get_figures(page_index)
-        if figure_label is not None:
-            figures = {figure_label: figures[figure_label]}
+        figures = self._located_figures(page_index, figure_label=figure_label)
 
         if len(figures) == 0:
             warn("No figures found to extract.")
@@ -2369,13 +2367,13 @@ class ArticlePDF:
 
         paths: list[Path] = []
         output_path.mkdir(parents=True, exist_ok=True)
-        for fig_label in figures:
-            fig_dpi = self._figure_dpi(fig_label) if dpi == "auto" else dpi
-            figure_images = self.get_figure_images(fig_label)
+        for fig_label, (page_ind, figure) in figures.items():
+            fig_dpi = self._figure_dpi(page_ind, figure) if dpi == "auto" else dpi
+            figure_images = self._components_in_figure(figure, self._images_cache[page_ind])
             if figure_images:
                 figure_image_page = self._make_image(figure_images)
                 pixmap = figure_image_page.get_pixmap(
-                    dpi=fig_dpi, clip=figures[fig_label].rect
+                    dpi=fig_dpi, clip=figure.rect
                 )
 
                 path = output_path / Path(f"{self.identifier}_fig_{fig_label}_image.png")
@@ -2419,9 +2417,7 @@ class ArticlePDF:
 
         output_path = Path(output_path)
 
-        figures = self.get_figures(page_index)
-        if figure_label is not None:
-            figures = {figure_label: figures[figure_label]}
+        figures = self._located_figures(page_index, figure_label=figure_label)
 
         if len(figures) == 0:
             warn("No figures found to extract.")
@@ -2429,11 +2425,10 @@ class ArticlePDF:
 
         paths: dict[str, Path] = {}
         output_path.mkdir(parents=True, exist_ok=True)
-        for fig_label in figures:
-            fig_dpi = self._figure_dpi(fig_label) if dpi == "auto" else dpi
-            page_ind = self._figure_label_to_page_ind[fig_label]
+        for fig_label, (page_ind, figure) in figures.items():
+            fig_dpi = self._figure_dpi(page_ind, figure) if dpi == "auto" else dpi
             pixmap = self._page(page_ind).get_pixmap(
-                dpi=fig_dpi, clip=figures[fig_label].rect
+                dpi=fig_dpi, clip=figure.rect
             )
 
             path = output_path / Path(f"{self.identifier}_fig_{fig_label}.png")
@@ -2604,43 +2599,71 @@ class ArticlePDF:
                             result.append(copy(rect) if copy_rects else rect)
         return result
 
-    def _get_figure_component_by_type(
-        self,
-        component_type: str,
-        figure_label: str | None = None,
-        page_index: int | None = None,
-        copy_objects: bool = False,
-    ) -> list[DrawingObjectPDF | ImageInfoPDF | TextBlockPDF]:
+    @staticmethod
+    def _components_in_figure(
+        figure: FigurePDF, components: Iterable[_Component], copy_objects: bool = False
+    ) -> list[_Component]:
+        """Return the components belonging to a figure on its physical page.
+
+        Parameters
+        ----------
+        figure : FigurePDF
+            Selected figure.
+        components : Iterable[_Component]
+            Images, drawings or text blocks from the same page.
+        copy_objects : bool
+            Whether to return copies rather than cached objects.
+
+        Returns
+        -------
+        list[_Component]
+            Matching components, including the source image of a raster caption.
         """
-        Internal method to get figure components (images, drawings, texts).
-        """
-
-        figures = self.get_figures(page_index)
-        if figure_label is not None:
-            figures = {figure_label: figures[figure_label]}
-
-        if len(figures) == 0:
-            warn("No figures found to extract.")
-            return []
-
-        components: list[DrawingObjectPDF | ImageInfoPDF | TextBlockPDF] = []
-        for fig_label in figures:
-            page_ind = self._figure_label_to_page_ind[fig_label]
-            page_components = getattr(self, f"_{component_type}_cache")[page_ind]
-
-            figure = figures[fig_label]
-            components.extend(
-                deepcopy(component) if copy_objects else component
-                for component in page_components
-                if figure.rect.contains(component.rect)
-                or (
-                    component_type == "images"
-                    and figure.caption.raster_figure_rect is not None
-                    and component.rect.contains(figure.rect)
-                    and component.rect.contains(figure.caption.rect)
-                )
+        return [
+            deepcopy(component) if copy_objects else component
+            for component in components
+            if figure.rect.contains(component.rect)
+            or (
+                isinstance(component, ImageInfoPDF)
+                and figure.caption.raster_figure_rect is not None
+                and component.rect.contains(figure.rect)
+                and component.rect.contains(figure.caption.rect)
             )
-        return components
+        ]
+
+    def _get_figure_components(
+        self,
+        cache: dict[int, tuple[_Component, ...]],
+        figure_label: str | None,
+        page_index: int | None,
+        copy_objects: bool,
+    ) -> list[_Component]:
+        """Collect components without resolving a selected figure's label again.
+
+        Parameters
+        ----------
+        cache : dict[int, tuple[_Component, ...]]
+            Page cache for the requested component type.
+        figure_label : str | None
+            Label to select, or None for all matching figures.
+        page_index : int | None
+            Page to search, or None for the whole document.
+        copy_objects : bool
+            Whether to return copies rather than cached objects.
+
+        Returns
+        -------
+        list[_Component]
+            Components of the selected figures.
+        """
+        figures = self._located_figures(page_index, figure_label=figure_label)
+        if not figures:
+            warn("No figures found to extract.")
+        return [
+            component
+            for page, figure in figures.values()
+            for component in self._components_in_figure(figure, cache[page], copy_objects)
+        ]
 
     def _get_raw_text_blocks_from_page(self, page_no: int) -> tuple[TextBlockPDF, ...]:
         """
