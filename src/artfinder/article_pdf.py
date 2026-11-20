@@ -17,10 +17,11 @@ import subprocess
 import unicodedata
 from bisect import bisect_right
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from copy import copy, deepcopy
 from dataclasses import replace
-from functools import cached_property
+from functools import cached_property, partial
 from itertools import chain
 from math import floor, inf
 from os import PathLike
@@ -70,6 +71,7 @@ logger = logging.getLogger(__name__)
 _Component = TypeVar("_Component", DrawingObjectPDF, ImageInfoPDF, TextBlockPDF)
 _Captioned = TypeVar("_Captioned", FigurePDF, TablePDF)
 _FigureLayer = Literal["figure", "vectors", "image", "text"]
+_InlinePayloads = dict[int, tuple[bytes, bytes | None]]
 # PyMuPDF exports its encryption constants dynamically.
 _KEEP_ENCRYPTION: int = getattr(pymupdf, "PDF_ENCRYPT_KEEP")
 
@@ -2424,11 +2426,17 @@ class ArticlePDF:
         layers: tuple[_FigureLayer, ...] = (
             (layer, "vectors", "image", "text") if extract_bases else (layer,)
         )
+        # Duplicate labels can put figures out of physical page order. Keep a
+        # page's inline bytes only until its final selected figure is rendered.
+        inline_images: dict[int, _InlinePayloads] = KeyedDict(self._inline_image_payloads)
+        last_on_page = {n: label for label, (n, _) in figures.items()} if "image" in layers else {}
         paths: dict[str, Path] = {}
         for label, (page_no, figure) in figures.items():
             resolution = self._figure_dpi(page_no, figure) if dpi == "auto" else dpi
             for part in layers:
-                pixmap = self._figure_layer_pixmap(part, page_no, figure, resolution, highlight_white)
+                pixmap = self._figure_layer_pixmap(
+                    part, page_no, figure, resolution, highlight_white, inline_images
+                )
                 if pixmap is None:
                     continue
                 suffix = "" if part == "figure" else f"_{part}"
@@ -2436,10 +2444,13 @@ class ArticlePDF:
                 pixmap.save(path, output="PNG")
                 if part == layer:
                     paths[label] = path
+            if inline_images and last_on_page[page_no] == label:
+                inline_images.pop(page_no, None)
         return paths
 
     def _figure_layer_pixmap(
-        self, layer: _FigureLayer, page_no: int, figure: FigurePDF, dpi: int, highlight_white: bool
+        self, layer: _FigureLayer, page_no: int, figure: FigurePDF, dpi: int,
+        highlight_white: bool, inline_images: dict[int, _InlinePayloads],
     ) -> Pixmap | None:
         """Render a figure or one of its layers in the physical page's orientation.
 
@@ -2455,6 +2466,8 @@ class ArticlePDF:
             Output resolution.
         highlight_white : bool
             Outline white fills on copies of the cached drawings.
+        inline_images : dict[int, _InlinePayloads]
+            Lazy page-to-payload lookup scoped to the current export.
 
         Returns
         -------
@@ -2466,31 +2479,33 @@ class ArticlePDF:
         if layer == "figure":
             return source.get_pixmap(dpi=dpi, clip=clip)
 
-        # Replay components in unrotated coordinates before turning the scratch
-        # page to match the source. Its crop box need not be the size of page 0.
+        draw: Callable[[Page], None]
+        if layer == "vectors":
+            drawings = self._components_in_figure(
+                figure, self._drawings_cache[page_no], copy_objects=highlight_white
+            )
+            if not drawings:
+                return None
+            if highlight_white:
+                for drawing in drawings:
+                    if drawing.fill == (1.0, 1.0, 1.0):
+                        drawing.width = 1
+            draw = partial(self._make_drawings, drawings)
+        elif layer == "image":
+            images = self._components_in_figure(figure, self._images_cache[page_no])
+            if not images:
+                return None
+            draw = partial(self._make_image, images, page_no, inline_images)
+        else:
+            texts = self._components_in_figure(figure, self._text_cache[page_no])
+            if not texts:
+                return None
+            draw = partial(self._make_text, texts)
+
+        # Only a nonempty layer needs a scratch page. Draw before rotating it.
         with pymupdf.open() as scratch:
             page = scratch.new_page(width=source.cropbox.width, height=source.cropbox.height)
-            if layer == "vectors":
-                drawings = self._components_in_figure(
-                    figure, self._drawings_cache[page_no], copy_objects=highlight_white
-                )
-                if not drawings:
-                    return None
-                if highlight_white:
-                    for drawing in drawings:
-                        if drawing.fill == (1.0, 1.0, 1.0):
-                            drawing.width = 1
-                self._make_drawings(drawings, page)
-            elif layer == "image":
-                images = self._components_in_figure(figure, self._images_cache[page_no])
-                if not images:
-                    return None
-                self._make_image(images, page, source)
-            else:
-                texts = self._components_in_figure(figure, self._text_cache[page_no])
-                if not texts:
-                    return None
-                self._make_text(texts, page)
+            draw(page)
             page.set_rotation(source.rotation)
             return page.get_pixmap(dpi=dpi, clip=clip)
 
@@ -2554,13 +2569,10 @@ class ArticlePDF:
         if hasattr(self, "path") and output_path.exists() and output_path.samefile(self.path):
             raise ValueError("Cannot write diagnostic marks over the source PDF.")
 
-        # Keep marks out of the live document, its page caches, and later saves.
-        with pymupdf.open(
-            stream=self.file.tobytes(encryption=_KEEP_ENCRYPTION), filetype="pdf"
-        ) as marked:
+        with self._marked_copy(output_path) as marked:
             pages = range(self.file.page_count) if page_number is None else (page_number,)
             for index in pages:
-                page = marked[index]
+                page = cast(Page, marked[index])
                 page_no = page.number
                 rects = []
                 for element in elements:
@@ -2606,8 +2618,36 @@ class ArticlePDF:
                     shape.finish(color=stroke_color, width=stroke_width)
                     shape.commit()
 
-            marked.save(str(output_path), encryption=_KEEP_ENCRYPTION)
         return str(output_path)
+
+    @contextmanager
+    def _marked_copy(self, destination: Path) -> Iterator[pymupdf.Document]:
+        """Stage the live PDF on disk and publish the copy only after marking succeeds.
+
+        Parameters
+        ----------
+        destination : Path
+            Output file, on the same filesystem as the staging directory.
+
+        Yields
+        ------
+        pymupdf.Document
+            Isolated, file-backed snapshot to mark.
+        """
+        with TemporaryDirectory(dir=destination.parent) as directory:
+            staged = Path(directory) / "snapshot.pdf"
+            self.file.save(str(staged), encryption=_KEEP_ENCRYPTION)
+            with pymupdf.open(str(staged)) as marked:
+                yield marked
+                if marked.is_dirty:
+                    if marked.can_save_incrementally():
+                        marked.saveIncr()
+                    else:
+                        staged = Path(directory) / "marked.pdf"
+                        marked.save(str(staged), encryption=_KEEP_ENCRYPTION)
+            if destination.exists():
+                copymode(destination, staged)
+            staged.replace(destination)
 
     # Private methods
 
@@ -3527,30 +3567,49 @@ class ArticlePDF:
                 shape.insert_text(**text_span)
         shape.commit()
 
-    def _make_image(self, images: Iterable[ImageInfoPDF], page: Page, source: Page) -> None:
+    def _inline_image_payloads(self, page_no: int) -> _InlinePayloads:
+        """Read image bytes only on a page where a selected image lacks an xref.
+
+        Parameters
+        ----------
+        page_no : int
+            Physical page containing inline images.
+
+        Returns
+        -------
+        _InlinePayloads
+            Image and optional mask bytes keyed by extractIMGINFO block number.
+        """
+        numbers = {im.number for im in self._images_cache[page_no] if not im.xref}
+        blocks = self._page(page_no).get_text("dict", flags=self._IMAGE_INFO_FLAGS)["blocks"]
+        return {
+            b["number"]: (b["image"], b.get("mask"))
+            for b in blocks if b["type"] == 1 and b["number"] in numbers
+        }
+
+    def _make_image(
+        self, images: Iterable[ImageInfoPDF], page_no: int,
+        inline_images: dict[int, _InlinePayloads], page: Page,
+    ) -> None:
         """Replay image placements, including inline images with no PDF xref.
 
         Parameters
         ----------
         images : Iterable[ImageInfoPDF]
             Selected images from the source page.
+        page_no : int
+            Source page owning the image blocks.
+        inline_images : dict[int, _InlinePayloads]
+            Lazy inline payloads shared by figures on this page.
         page : Page
             Unrotated scratch page to draw on.
-        source : Page
-            Page owning the image blocks.
         """
-        inline: dict[int, dict] | None = None
         for image in images:
             if image.xref:
                 page.insert_image(image.rect, pixmap=Pixmap(self.file, image.xref))
                 continue
-            if inline is None:
-                # Match extractIMGINFO's block numbers with identical layout flags.
-                # Only materialize payloads when a selected image has no xref.
-                blocks = source.get_text("dict", flags=self._IMAGE_INFO_FLAGS)["blocks"]
-                inline = {b["number"]: b for b in blocks if b["type"] == 1}
-            block = inline[image.number]
-            page.insert_image(image.rect, stream=block["image"], mask=block.get("mask"))
+            data, mask = inline_images[page_no][image.number]
+            page.insert_image(image.rect, stream=data, mask=mask)
 
     def _calc_paragraph_width(self, eps: float = 4.0) -> Size:
         """

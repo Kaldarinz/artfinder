@@ -73,6 +73,47 @@ def test_mark_then_save_doi_does_not_mark_original(tmp_path: Path) -> None:
         assert original[0].read_contents() == contents
 
 
+@pytest.mark.parametrize("incremental", [True, False], ids=["append", "full-save"])
+def test_mark_stages_live_encrypted_pdf_on_disk(tmp_path: Path, incremental: bool) -> None:
+    """Mark the live state, not stale source bytes, without a PDF-sized bytes object."""
+    path = tmp_path / "restricted.pdf"
+    with pymupdf.open() as doc:
+        doc.new_page().insert_text((70, 70), "Example.")
+        doc.save(path, encryption=getattr(pymupdf, "PDF_ENCRYPT_AES_256"), owner_pw="owner",
+                 user_pw="", permissions=getattr(pymupdf, "PDF_PERM_PRINT"))
+    original = path.read_bytes()
+    output = tmp_path / "restricted_text.pdf"
+    output.touch(mode=0o600)
+    with ArticlePDF(path) as article:
+        article.file.set_metadata({"title": "Unsaved edit"})
+        with patch.object(article.file, "tobytes", side_effect=AssertionError("full memory copy")), patch.object(
+            pymupdf.Document, "can_save_incrementally", return_value=incremental
+        ):
+            assert Path(article.mark("text", output_path=tmp_path)) == output
+        with pymupdf.open(output) as marked:
+            assert marked.metadata["title"] == "Unsaved edit"
+            assert marked.metadata["encryption"] == article.file.metadata["encryption"]
+            assert marked.permissions == article.file.permissions
+            assert len(marked[0].get_drawings()) == 1
+    assert path.read_bytes() == original
+    assert S_IMODE(output.stat().st_mode) == 0o600
+
+
+def test_failed_mark_preserves_previous_output(tmp_path: Path) -> None:
+    """A failed mark must not publish a partial diagnostic or leave staging files."""
+    with pymupdf.open() as doc:
+        doc.new_page()
+        source = doc.tobytes()
+    output = tmp_path / "sample_text.pdf"
+    output.write_bytes(b"previous result")
+    with ArticlePDF(source, identifier="sample") as article, patch.object(
+        article, "get_text_rects", side_effect=ValueError("cannot extract")
+    ), pytest.raises(ValueError, match="cannot extract"):
+        article.mark("text", output_path=tmp_path)
+    assert output.read_bytes() == b"previous result"
+    assert list(tmp_path.iterdir()) == [output]
+
+
 def test_failed_replace_leaves_original_readable(tmp_path: Path) -> None:
     """A failed replacement leaves the source on disk and its open reader usable."""
     path = tmp_path / "paper.pdf"
