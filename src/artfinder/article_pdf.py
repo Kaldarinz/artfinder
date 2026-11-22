@@ -5297,6 +5297,7 @@ class ArticlePDF:
         ]
 
         result: list[Rect] = []
+        possible_separators: set[int] = set()
         for rect, stroke_width in candidates:
             if rect.get_area() > page_area * self.MAX_IMAGE_AREA:
                 continue
@@ -5336,6 +5337,14 @@ class ArticlePDF:
                 self._fraction_inside(rect, caption) > 0.5 for caption in caption_rects
             ):
                 continue
+            # A rule spanning just the caption can be shorter than a page rule.
+            if max(rect.height, stroke_width) < self.MAX_HAIRLINE_WIDTH and any(
+                0 <= rect.y0 - caption.y1 <= self.FIGURE_GRAPHICS_GAP
+                and abs(rect.x0 - caption.x0) <= self.MARGIN
+                and abs(rect.x1 - caption.x1) <= self.MARGIN
+                for caption in caption_rects
+            ):
+                possible_separators.add(len(result))
             for caption in caption_rects:
                 if not rect.intersects(caption):
                     continue
@@ -5344,7 +5353,18 @@ class ArticlePDF:
                 else:
                     rect.y0 = max(rect.y0, caption.y1)
             result.append(rect)
-        return result
+
+        if not possible_separators:
+            return result
+        # Keep a possible axis only if another surviving graphic is within
+        # reach. Discarded page furniture and text labels cannot anchor it.
+        return [
+            rect for i, rect in enumerate(result)
+            if i not in possible_separators or any(
+                other is not rect and self._gap_between(rect, other) <= self.FIGURE_GRAPHICS_GAP
+                for other in result
+            )
+        ]
 
     def _column_gutter_middle(self, page_no: int) -> float | None:
         """

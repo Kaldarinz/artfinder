@@ -82,6 +82,39 @@ def test_plot_axes_are_included_in_figure_bounds() -> None:
         assert article.figures["1"].rect == bounds
 
 
+def test_caption_width_axis_attached_to_plot_is_not_a_separator() -> None:
+    """Keep an axis directly below a caption when it touches the data path."""
+    caption = "Figure 1. Measurements."
+    right = 80 + pymupdf.get_text_length(caption, fontsize=10)
+    with pymupdf.open() as document:
+        page = document.new_page(width=400, height=400)
+        page.insert_text((80, 90), caption, fontsize=10)
+        page.draw_line((80, 100), (right, 100), width=0.5)
+        page.draw_line((100, 160), (right, 100), width=1)
+        data = document.tobytes()
+    with ArticlePDF(data, identifier="caption-width-axis") as article:
+        assert tuple(article.figures["1"].rect) == pytest.approx((80, 100, right, 160))
+
+
+@pytest.mark.parametrize("wide_rule_first", [False, True])
+def test_discarded_rule_cannot_anchor_caption_separator(wide_rule_first: bool) -> None:
+    """A nearby page rule must not turn the equations beneath a caption into a plot."""
+    caption = "Figure 1. Measurements."
+    right = 80 + pymupdf.get_text_length(caption, fontsize=10)
+    chart = Rect(80, 20, round(right), 65)
+    with pymupdf.open() as document:
+        page = document.new_page(width=400, height=400)
+        page.draw_rect(chart)
+        page.insert_text((80, 90), caption, fontsize=10)
+        rules = [((80, 100), (right, 100)), ((30, 105), (370, 105))]
+        for start, end in reversed(rules) if wide_rule_first else rules:
+            page.draw_line(start, end, width=0.5)
+        page.insert_text((right + 2, 116), "x = 2", fontsize=10)
+        data = document.tobytes()
+    with ArticlePDF(data, identifier="discarded-rule") as article:
+        assert article.figures["1"].rect == chart
+
+
 def test_an_isolated_hairline_is_not_a_figure_panel() -> None:
     """Preserving plot borders must not promote isolated strokes to panels."""
     with pymupdf.open() as document:
