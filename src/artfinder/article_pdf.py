@@ -336,6 +336,8 @@ class ArticlePDF:
         re.IGNORECASE | re.MULTILINE,
     )
     "Pattern of a standalone bibliography heading, used to stop the DOI search."
+    _REFERENCE_LABEL = re.compile(r"^[ \t]*\[(\d+)\]", re.MULTILINE)
+    _PUBLICATION_YEAR = re.compile(r"(?:^|[\s(,])(?:18|19|20)\d{2}\b")
 
     def __init__(self, pdf: PathLike | str | bytes, identifier: str = ""):
         """
@@ -563,14 +565,14 @@ class ArticlePDF:
         -------
         bool
             Whether a line matching `SUPPLEMENT_DETECTION_PATTERN` passes the
-            size and position test of a title candidate
-            (`_title_candidate_font`).
+            same size and starting-position tests as a title.
         """
 
         # The pattern goes first: on a page without a match, the document-wide
         # body font and header are never needed.
         return any(
             self.SUPPLEMENT_DETECTION_PATTERN.match(line.text)
+            and line.rect.y0 <= self._title_start_limit
             and self._title_candidate_font(block, line) is not None
             for block in self._text_cache[0]
             for line in block.lines
@@ -1596,6 +1598,38 @@ class ArticlePDF:
             self._text_cache, figure_label, page_index, copy_objects
         )
 
+    @classmethod
+    def _bibliography_start(cls, text: str) -> int | None:
+        """Locate a references heading or the first two entries of an unheaded list.
+
+        Parameters
+        ----------
+        text : str
+            Text of one page, with line breaks preserved.
+
+        Returns
+        -------
+        int | None
+            Offset before the cited works, or None without a reliable boundary.
+        """
+        heading = cls.REFERENCES_HEADING_PATTERN.search(text)
+        end = heading.start() if heading else len(text)
+        labels = list(cls._REFERENCE_LABEL.finditer(text, 0, end))
+        for i, (first, second) in enumerate(zip(labels, labels[1:])):
+            if (first[1], second[1]) != ("1", "2"):
+                continue
+            stop = labels[i + 2].start() if i + 2 < len(labels) else end
+            entries = (text[first.end():second.start()], text[second.end():stop])
+            for entry in entries:
+                # Don't borrow evidence from a later paragraph or numbered item.
+                paragraph = re.split(r"\n[ \t]*\n", entry, maxsplit=1)[0]
+                year = cls._PUBLICATION_YEAR.search(paragraph)
+                if not year or not next(iter_dois_in_text(paragraph[year.end():]), None):
+                    break
+            else:
+                return first.start()
+        return heading.start() if heading else None
+
     def _get_doi(self) -> str | None:
         """
         Get DOI of the article from the PDF metadata or article text.
@@ -1630,13 +1664,13 @@ class ArticlePDF:
             if not isinstance(page_text, str):
                 continue
             # The bibliography lists the DOIs of cited works, never the article's own.
-            refs_match = self.REFERENCES_HEADING_PATTERN.search(page_text)
-            if refs_match is not None:
-                page_text = page_text[: refs_match.start()]
+            refs_start = self._bibliography_start(page_text)
+            if refs_start is not None:
+                page_text = page_text[:refs_start]
             doi = self.extract_doi_from_text(page_text)
             if doi is not None:
                 return doi
-            if refs_match is not None:
+            if refs_start is not None:
                 break
         warn(f"DOI not found in metadata or text of {self}.")
         return None
@@ -1976,15 +2010,21 @@ class ArticlePDF:
         page_letters = letters(page_text) if isinstance(page_text, str) else ""
         return not page_letters or letters(text) in page_letters
 
+    @property
+    def _title_start_limit(self) -> float:
+        """Lowest position at which a title or prominent SI heading may start."""
+        rect = cast(Rect, self._page(0).rect)
+        return rect.y0 + rect.height * self.TITLE_MAX_PAGE_FRACTION
+
     def _title_candidate_font(
         self, block: TextBlockPDF, line: TextLinePDF
     ) -> tuple[str, float] | None:
         """
         Internal method to test a first-page line as a possible part of a title.
 
-        A candidate is horizontal, starts in the top `TITLE_MAX_PAGE_FRACTION`
-        of the page, is set larger than the body by more than
+        A candidate is horizontal, is set larger than the body by more than
         `FONT_SIZE_TOLERANCE`, and lies outside the header and running matter.
+        Position constrains the start of the title, not its continuation lines.
         The tests that need the whole document come last.
 
         Parameters
@@ -2000,9 +2040,7 @@ class ArticlePDF:
             The line's font family and size if it is a candidate, otherwise None.
         """
 
-        page_rect = cast(Rect, self._page(0).rect)
-        max_y = page_rect.y0 + page_rect.height * self.TITLE_MAX_PAGE_FRACTION
-        if line.rotation != 0 or line.rect.y0 > max_y:
+        if line.rotation != 0:
             return None
         font = self._block_font(TextBlockPDF(rect=line.rect, lines=[line]))
         if font is None or font[1] <= self.body_font[1] + self.FONT_SIZE_TOLERANCE:
@@ -2041,22 +2079,27 @@ class ArticlePDF:
                 if font is not None:
                     lines_by_font.setdefault(font, []).append(line)
 
+        max_start = self._title_start_limit
         candidates: list[tuple[float, str]] = []
         for (_, size), lines in lines_by_font.items():
             for group in self._title_line_groups(lines, size):
+                if group[0].rect.y0 > max_start:
+                    continue
                 text = self.SUPPLEMENT_HEADING_PATTERN.sub(
                     "", self._join_caption_lines(group, keep_hyphens=True), count=1
                 )
                 if self._is_title_like(text):
                     candidates.append((size, text))
         if not candidates:
-            # On some SI covers only the standalone SI heading is enlarged.
-            # Look above it, never below it among section titles and captions.
+            # A body-sized title may precede an enlarged SI heading, or
+            # follow a body-sized heading that opens the cover. Without a
+            # heading, require a byline corroborated by its affiliation marks.
             heading_top = min((
                 line.rect.y0 for lines in lines_by_font.values() for line in lines
-                if self.SUPPLEMENT_HEADING_PATTERN.fullmatch(line.text.strip())
+                if line.rect.y0 <= max_start
+                and self.SUPPLEMENT_HEADING_PATTERN.fullmatch(line.text.strip())
             ), default=None)
-            return self._bold_opening_title(heading_top) if heading_top is not None else None
+            return self._bold_opening_title(heading_top)
         largest = max(size for size, _ in candidates)
         return max(
             (
@@ -2067,53 +2110,151 @@ class ArticlePDF:
             key=len,
         )
 
-    def _bold_opening_title(self, heading_top: float) -> str | None:
-        """Read a body-sized title distinguished only by bold type on an SI cover.
+    @classmethod
+    def _has_affiliated_byline(cls, last: TextLinePDF, following: list[TextLinePDF]) -> bool:
+        """Check for marked names immediately followed by a matching affiliation.
 
         Parameters
         ----------
-        heading_top : float
-            Top of the prominent, standalone supplementary heading on page one.
+        last : TextLinePDF
+            Last line of the candidate title.
+        following : list[TextLinePDF]
+            Remaining lines in reading order.
+
+        Returns
+        -------
+        bool
+            Whether at least two names have superscript markers and the next
+            line starts with one of those markers in smaller type.
+        """
+        markers: set[str] = set()
+        names = 0
+        for line in following:
+            if not 0 < cls._baseline(line) - cls._baseline(last) <= 3 * last.rect.height:
+                break
+            spans = [s for s in line.spans if s.text.strip()]
+            if not spans:
+                break
+            if names >= 2 and spans[0].text.strip() in markers and len(spans) > 1:
+                return spans[0].size + cls.FONT_SIZE_TOLERANCE < max(s.size for s in spans[1:])
+
+            count_before = names
+            for previous, span in zip(spans, spans[1:]):
+                if not span.flags & pymupdf.TEXT_FONT_SUPERSCRIPT:
+                    continue
+                mark = span.text.strip().rstrip("*")
+                if not re.fullmatch(r"(?:[a-z]|\d+)(?:\s*,\s*(?:[a-z]|\d+))*", mark):
+                    continue
+                # A chemical exponent or numbered footnote in prose is not a
+                # marked name. Look for name words immediately before the mark.
+                words = previous.text.split(",")[-1].split()
+                if len(words) >= 2 and words[-1][0].isupper() and words[-2][0].isupper():
+                    markers.update(part.strip() for part in mark.split(","))
+                    names += 1
+            if names == count_before:
+                break
+            last = line
+        return False
+
+    def _bold_opening_title(self, heading_top: float | None) -> str | None:
+        """Read a body-sized bold cover title identified by an SI heading or byline.
+
+        Parameters
+        ----------
+        heading_top : float | None
+            Top of a prominent SI heading. Without one, require a body-sized
+            SI heading before the title or a marked byline immediately after.
 
         Returns
         -------
         str | None
             Title if the page opens with a title-like run in bold, else None.
         """
+        blocks = self._text_cache[0]
+        # Without an SI heading or a superscript, neither fallback can match.
+        # Rule that out before header_rect loads graphics from every page.
+        if heading_top is None and not any(
+            self.SUPPLEMENT_HEADING_PATTERN.fullmatch(line.text.strip())
+            or any(span.flags & pymupdf.TEXT_FONT_SUPERSCRIPT for span in line.spans)
+            for block in blocks for line in block.lines if line.rotation == 0
+        ):
+            return None
+
         header = self.header_rect
         lines = sorted((
-            line for block in self._text_cache[0]
+            line for block in blocks
             if (header.is_empty or block.rect.y1 > header.y1)
             and not self._is_running_matter(block.rect)
             for line in block.lines
-            if line.rotation == 0 and line.rect.y1 <= heading_top and line.text.strip()
+            if line.rotation == 0 and line.text.strip()
+            and (heading_top is None or line.rect.y1 <= heading_top)
         ), key=lambda line: (line.rect.y0, line.rect.x0))
+        max_gap = self.TITLE_MAX_LINE_GAP
+        if not lines:
+            return None
+        needs_byline = heading_top is None and not self.SUPPLEMENT_HEADING_PATTERN.fullmatch(
+            lines[0].text.strip()
+        )
+        if heading_top is None and not needs_byline:
+            if len(lines) < 2:
+                return None
+            heading, first = lines[:2]
+            heading_font = self._block_font(TextBlockPDF(rect=heading.rect, lines=[heading]))
+            gap = self._line_core(first).y0 - self._line_core(heading).y1
+            if (
+                heading_font is None
+                or abs(heading_font[1] - self.body_font[1]) > self.FONT_SIZE_TOLERANCE
+                or not 0 <= gap <= max_gap * heading_font[1]
+            ):
+                return None
+            lines = lines[1:]
+            # A body-sized title on a manuscript cover may be double-spaced.
+            max_gap = 2.0
+        first = lines[0]
+        if (first.rect.y0 > self._title_start_limit
+                or self._caption_opening(first, self.CAPTION_PATTERN)
+                or self.TABLE_CAPTION_PATTERN.match(first.text.strip())):
+            return None
+
         opening: list[TextLinePDF] = []
         opening_font: tuple[str, float] | None = None
+        opening_emphasis = 0
         for line in lines:
-            if not all(span.flags & pymupdf.TEXT_FONT_BOLD for span in line.spans if span.text.strip()):
+            styles: Counter[tuple[str, float, int]] = Counter()
+            for span in line.spans:
+                if span.text.strip() and not span.flags & pymupdf.TEXT_FONT_SUPERSCRIPT:
+                    emphasis = span.flags & (pymupdf.TEXT_FONT_BOLD | pymupdf.TEXT_FONT_ITALIC)
+                    style = self._font_family(span.font), round(span.size, 1), emphasis
+                    styles[style] += len(span.text.strip())
+            if not styles:
                 break
-            font = self._block_font(TextBlockPDF(rect=line.rect, lines=[line]))
-            if font is None or abs(font[1] - self.body_font[1]) > self.FONT_SIZE_TOLERANCE:
+            family, size_pt, emphasis = styles.most_common(1)[0][0]
+            if (
+                not emphasis & pymupdf.TEXT_FONT_BOLD
+                or abs(size_pt - self.body_font[1]) > self.FONT_SIZE_TOLERANCE
+            ):
                 break
-            if opening_font is not None and font != opening_font:
+            if opening_font is None:
+                opening_font, opening_emphasis = (family, size_pt), emphasis
+            elif not self._same_font(opening_font, (family, size_pt)) or emphasis != opening_emphasis:
                 break
-            opening_font = font
             opening.append(line)
         if opening_font is None:
             return None
-        group = self._title_line_groups(opening, opening_font[1])[0]
+        group = self._title_line_groups(opening, opening_font[1], max_gap=max_gap)[0]
+        if needs_byline and not self._has_affiliated_byline(group[-1], lines[len(group):]):
+            return None
         return self._clean_metadata_title(self._join_caption_lines(group, keep_hyphens=True))
 
     def _title_line_groups(
-        self, lines: list[TextLinePDF], size: float
+        self, lines: list[TextLinePDF], size: float, *, max_gap: float = TITLE_MAX_LINE_GAP
     ) -> list[list[TextLinePDF]]:
         """
         Internal method to group lines of one font into runs that read as one text.
 
         A line joins the run above it if it overlaps the run horizontally and
         either sits on the same baseline as its last line or follows it: the
-        second line at most `TITLE_MAX_LINE_GAP` font sizes below, every later
+        second line at most `max_gap` font sizes below, every later
         one at the pitch of the first two. That keeps an author list set in the
         title's font a little further down out of the title.
 
@@ -2123,6 +2264,8 @@ class ArticlePDF:
             Lines set in one font.
         size : float
             Size of that font.
+        max_gap : float
+            Largest blank gap between the first two lines, in font sizes.
 
         Returns
         -------
@@ -2149,7 +2292,7 @@ class ArticlePDF:
                     continue
                 if pitch is None:
                     gap = line.rect.y0 - last.rect.y1
-                    follows = gap <= size * self.TITLE_MAX_LINE_GAP
+                    follows = gap <= size * max_gap
                 else:
                     follows = abs(delta - pitch) <= pitch * self.LINE_PITCH_TOLERANCE
                 if overlaps and follows:
@@ -2894,6 +3037,20 @@ class ArticlePDF:
             ):
                 continue
             if not i:
+                # A single block can also hold *two* captions with a blank
+                # line between them. Keep both available to the caption and
+                # geometry passes, rather than discarding everything after one.
+                opening, cut = cls._cut_at_blank_line(block)
+                if cut:
+                    rest = block.lines[len(opening.lines):]
+                    match = cls._caption_opening(rest[0], cls.CAPTION_PATTERN) or (
+                        cls.TABLE_CAPTION_PATTERN.match(rest[0].text.strip())
+                    )
+                    if match and cls._caption_delimiter(match.group()):
+                        rect = Rect()
+                        for remaining in rest:
+                            rect.include_rect(remaining.rect)
+                        return opening, replace(block, rect=rect, lines=rest)
                 break
             leading = block.lines[:i]
             caption_lines = block.lines[i:]

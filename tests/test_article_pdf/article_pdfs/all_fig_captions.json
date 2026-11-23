@@ -1,4 +1,32 @@
 {
+    "10.1021_acsomega.9b01983_si.pdf": {
+        "S1": "Confined mode synthesis in a VFD for 15 mins, for 1 mL of water, tilt angle 45º, and rotational speed 7.5k rpm, coupled with a 1064 nm pulse laser operating at (a) 450 mJ, (b) 550 mJ, and (c) 600 mJ.",
+        "S2": "X-ray diffraction data (Co source, \uf06c = 1.7889 Aº): (a) Different laser power (550 mJ, 600 mJ) for 15 mins of VFD processing in the confined mode, for 1 mL of water, and rotation speed 7.5k rpm. (b) Confined mode for 15 mins, 1 mL of water and laser power at 600 mJ with different rotation speeds of the glass tube in a VFD (4.5, 5.5, 6.5, 7.5 and 8.5k rpm). (c) Continuous flow processing at different flow rates (0.1, 0.25, 0.5, 0.75 and 1 mL/min), rotational speed 7.5k rpm, laser power 600 mJ, to collect 10 mL of the liquid. All experiments were at a tilt angle of 45º.",
+        "S3": "Photographs of solutions from 10 mL of processed liquid generated for the experiments in Fig.S2c at flow rates of (a) 1 mL/min, (b) 0.75 mL/min. (c) 0.5 mL/min, (d) 0.25 mL/min, (e) 0.1 mL/min.",
+        "S4": "Photographs showing (a) the copper rod positioned inside the glass tube in a VFD rotating at 7.5k rpm, (b) 600 mJ pulsed laser irradiation (1064 nm wavelength) of the copper rod for (a) operating in the confined mode after 15 min, (c) the VFD tube after 2 h of continuous flow with the tube rotating at 7.5k rpm in the VFD housing the copper rod irradiated at 600 mJ, as for (a), (d) the solution exited from the VFD for experiments in (c), and (e) the solution left in the VFD tube after 2 h of the processing. All experiments were at a tilt angle of 45º.",
+        "S5": "(a) Dispersion of Cu 2 ONPs in water produced at 600 mJ pulsed laser power, 7.5k rpm rotational speed and at 0.25 mL/min, tilt angle 45º. (b) Dispersion of CuONPs after the solution from (a) was heated in oven at 50ºC for 10 h.",
+        "S6": "Solutions after 15 min confined mode experiments, rotational speed 7.5k rpm, pulsed laser 600 mJ and tilt angle 45º under different atmospheres: (a) air and (b) nitrogen gas.",
+        "S7": "SEM images prepared via drop cast of material formed and spin coating, using a VFD under continuous flow of water at 0.25 mL/min, with the glass tube at 45º tilt angle and rotating at 7.5k rpm, using a 1064 nm pulsed laser operating at 600 mJ, irradiating a pure copper target, (a-c) as prepared Cu 2 ONPs and (d-f) CuONPs after heating the as prepared solutions at 50ºC for 10 h.",
+        "S8": "SEM images of material after drop casting solutions left in the tube following the experiments in Fig. S7: (a-c) Cu 2 ONPs (d-f) CuONPs, (g) XRD for dicopper oxide in the tube, and (h) XRD for copper oxide after leaved Cu 2 ONPs collected from the tube as solution in oven at 50ºC for 10 h.",
+        "S9": "TEM images of material formed using a VFD under continuous flow of water at 0.25 mL/min, 45º tilt angle, using a 1064 nm pulsed laser operating at 600 mJ irradiating a copper target, (a-c) as prepared Cu 2 ONPs and (d-f) CuONPs after heating as prepared solutions at 50ºC for 10 h.",
+        "S10": "(a-h) SEM images of material deposited by drop casting material formed using a VFD in the confined mode for 1 mL of water for 15 min, with the glass tube at 45º tilt angle and rotating at 4k rpm, using a 1064 nm pulsed laser operating at 600 mJ irradiating a copper target,"
+    },
+    "10.1021_acsomega.8b01606_si.pdf": {
+        "S1": "(a) First-order Raman spectrum for the as prepared IONPs using the VFD, and (b) second-order Raman spectrum for the as prepared IONPs using the VFD. IONPs were prepared at laser power 360 mJ for the VFD tube rotated at 7500 rpm for 15 min, in the confined mode with 1 mL water.",
+        "S2": "FT-IR spectra of the IONPs prepared at 360 mJ, 7500 rpm for 15 min with 1 mL of water. Assignment of the peaks are based on previous literatures 1,2.",
+        "S3": "XRD of iron oxide nanoparticles (IONPs) obtained at different rotational speeds of VFD operating in the confined mode at 360 mJ containing 1 mL water for 15 min.",
+        "S4": "FT-IR spectrum of IONPs obtained at different rotational speeds of VFD operating in the confined mode at 360 mJ containing 1 mL water for 15 min.",
+        "S5": "XRD of IONPs obtained at different flow rate of VFD (0.1, 0.5 and 1 mL/min) operating in the continuous flow mode at 360 mJ.",
+        "S6": "Samples left inside the VFD tube post VFD processing under continuous flow at 360 mJ, 7500 rpm with flow rate at 0.1 mL/min.",
+        "S7": "UV-vis of IONPs obtained using VFD (a) in the atmosphere of air or N 2; (b) under either gas-phase or gas- and liquid- phases. Operation of VFD in the confined mode at 7500 rpm for 15 min at laser power of 360 mJ."
+    },
+    "10.1021_acsomega.5c05967_si.pdf": {
+        "S1": "Dynamic light scattering (DLS) measurement of Au NPs in CB.",
+        "S2": "(a) XRD patterns and (b) partial XRD patterns at the region of (211) diffraction peak acquired from control and Au NPs-modified CsFAMA films deposited on Glass/FTO/SnO 2 substrate.",
+        "S3": "TRPL decay curves acquired from control and Au NPs-modified CsFAMA films. a) control, b) concentrated, c) 1:1 (v/v), d) 1:2 (v/v), e) 1:4 (v/v), f) 1:8 (v/v).",
+        "S4": "Stability test of PSCs (control and Au NPs 1:8) conducted following the ISOS-1D protocol: (a) PCE and (b) standardized PCE as a function of air exposure time.",
+        "S5": "Maximum power point (MPP) tracking under continuous illumination for the (a) control and (b) Au NPs-modified device (1:8)."
+    },
     "10.1021_acsomega.5c04247_si.pdf": {
         "S1": "Image of the AgNPs in CB suspension.",
         "S2": "Absorbance spectrum of Ag NPs film deposited by drop casting method onto a quartz substrate(~ 100 nm thickness). Inset: the absorbance spectrum acquired from Ag NPs in CB suspension.",

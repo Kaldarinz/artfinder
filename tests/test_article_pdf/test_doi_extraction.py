@@ -141,6 +141,33 @@ def _make_pdf(pages: list[str]) -> bytes:
 class TestBibliographyGuard:
     """The DOIs of cited works must never be taken for the article's own."""
 
+    def test_headingless_si_references_are_not_its_doi(self) -> None:
+        """The only two DOIs in this SI belong to the cited works on page 11."""
+        with ArticlePDF(TEST_PDFS_DIR / "10.1021_acsomega.5c04247_si.pdf") as article:
+            with pytest.warns(UserWarning, match="DOI not found"):
+                assert article.doi is None
+
+    def test_doi_before_headingless_references_is_kept(self) -> None:
+        """Even a longer cited DOI cannot displace the document DOI above [1]."""
+        pdf = _make_pdf([
+            "Article DOI: 10.5555/study\n"
+            "[1] First Author, Journal 8 (2020). doi:10.5555/study.previous\n"
+            "[2] Second Author, Journal 4 (2018). doi:10.1111/b\n"
+        ])
+        with ArticlePDF(pdf, identifier="test") as article:
+            assert article.doi == "10.5555/study"
+
+    @pytest.mark.parametrize("second", [
+        "[2] How to cite this document: doi:10.5555/study.2020",
+        "[2] Published in 2020.\n[3] Article DOI: 10.5555/study.2020",
+        "[4] Published in 2020. Article DOI: 10.5555/study.2020",
+    ])
+    def test_numbered_notes_are_not_a_bibliography(self, second: str) -> None:
+        """Each consecutive entry needs its own year and DOI, not a year in a DOI."""
+        pdf = _make_pdf([f"[1] Publication record (2020): 10.5555/study.2020\n{second}"])
+        with ArticlePDF(pdf, identifier="test") as article:
+            assert article.doi == "10.5555/study.2020"
+
     def test_reference_doi_after_heading_is_not_used(self) -> None:
         """With no DOI in the front matter, the result is None, not a cited DOI."""
         pdf = _make_pdf(

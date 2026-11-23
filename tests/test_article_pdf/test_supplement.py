@@ -16,6 +16,8 @@ TEST_PDFS_DIR = Path(__file__).parent / "article_pdfs"
 SI_NAME = re.compile(r"(?<!_with)_si(?:_watermarked)?\.pdf$")
 "File name of a supplement in the corpus; `_with_si` is a main text bound with its SI."
 UNDETECTED = {
+    # Starts with the article title and byline. Neither identifies it as SI.
+    "10.1021_acsomega.9b01983_si.pdf",
     # Opens directly on "Table S1. Humoral factors …", with no heading at all.
     "silicon-gold nanoparticles affect wharton's jelly phenotype and secretome"
     " during tri-lineage differentiation_si.pdf",
@@ -260,4 +262,6 @@ def test_scan(pages: int) -> None:
     with ArticlePDF(doc.tobytes()) as pdf:
         assert pdf.doi == "10.5555/scan.2019.001"
         assert pdf.title is None
+        assert not pdf._drawings_cache
+        assert not pdf._images_cache
         assert pdf.is_supplement is False
