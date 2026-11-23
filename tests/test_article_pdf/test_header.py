@@ -157,6 +157,12 @@ class TestFooter:
 class TestBandCandidates:
     """Tests for what may take part in header and footer detection."""
 
+    def test_page_background_is_neither_header_nor_footer(self) -> None:
+        """A repeated page fill on paragraph-free pages belongs to neither band."""
+        with ArticlePDF(TEST_PDFS_DIR / "10.1038_srep32631_si.pdf") as article:
+            assert article.header_rect.is_empty
+            assert article.footer_rect.is_empty
+
     def test_header_covers_a_deep_running_head(self) -> None:
         """Test a header set deeper than the search band.
 

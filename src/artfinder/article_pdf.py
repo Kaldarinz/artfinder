@@ -809,7 +809,7 @@ class ArticlePDF:
 
         return max(2, (self.file.page_count - 1) // 2)
 
-    def _repeating_rects_in(self, band: Rect, is_header: bool) -> list[Rect]:
+    def _repeating_rects_in(self, band: Rect, opposite_band: Rect, *, is_header: bool) -> list[Rect]:
         """
         Internal method to find what repeats at the same place inside a band.
 
@@ -822,6 +822,8 @@ class ArticlePDF:
         a header ends above every paragraph of its page, a footer starts below
         them all. That keeps out an element that merely dips into the band —
         a caption at the foot of a page, or a sidebar running the height of it.
+        Even on a page without paragraphs, an element reaching into both bands
+        (such as a page background) belongs to neither.
 
         An image must also repeat its picture, not only its place: a figure-only
         supplement can set a figure of the same size at the top of every page,
@@ -836,6 +838,8 @@ class ArticlePDF:
         ----------
         band : Rect
             Band of the page to search.
+        opposite_band : Rect
+            Objects also reaching this band belong to neither margin.
         is_header : bool
             Whether the band is at the top of the page rather than the bottom.
 
@@ -875,7 +879,7 @@ class ArticlePDF:
                     ),
                 )
                 for rect, digest in rects:
-                    if not Rect(rect).intersects(band):
+                    if not band.intersects(rect) or opposite_band.intersects(rect):
                         continue
                     if is_header:
                         if body_top is not None and rect.y1 > body_top:
@@ -903,6 +907,34 @@ class ArticlePDF:
             if len(pages) == most_pages
         ]
 
+    def _running_band(self, *, is_header: bool) -> Rect:
+        """Bound the repeating furniture at one end of the page.
+
+        Parameters
+        ----------
+        is_header : bool
+            Search the top margin rather than the bottom.
+
+        Returns
+        -------
+        Rect
+            Full-width header or footer, empty if no furniture repeats.
+        """
+        page = cast(Rect, self._page(0).rect)
+        top, bottom = Rect(page), Rect(page)
+        top.y1 = page.y0 + page.height * self.HEADER_MAX_FRACTION
+        bottom.y0 = page.y1 - page.height * self.FOOTER_MAX_FRACTION
+        band, opposite = (top, bottom) if is_header else (bottom, top)
+        common = self._repeating_rects_in(band, opposite, is_header=is_header)
+        if not common:
+            logger.debug(f"{'Header' if is_header else 'Footer'} rectangle not found for {self}.")
+            return Rect()
+        if is_header:
+            band.y1 = max(rect.y1 for rect in common)
+        else:
+            band.y0 = min(rect.y0 for rect in common)
+        return band
+
     @cached_property
     def header_rect(self) -> Rect:
         """
@@ -917,18 +949,7 @@ class ArticlePDF:
             The header rectangle if found, otherwise an empty Rect.
         """
 
-        # We assume that all pages in the pdf file have the same size
-        search_rect = cast(Rect, self._page(0).rect)
-        search_rect.y1 = search_rect.height * self.HEADER_MAX_FRACTION
-
-        common = self._repeating_rects_in(search_rect, is_header=True)
-        if not common:
-            # A document need not have a running header at all:
-            # supplementary information and preprints usually do not.
-            logger.debug(f"Header rectangle not found for {self}.")
-            return Rect()
-        search_rect.y1 = max(rect.y1 for rect in common)
-        return search_rect
+        return self._running_band(is_header=True)
 
     @cached_property
     def footer_rect(self) -> Rect:
@@ -946,20 +967,7 @@ class ArticlePDF:
             The footer rectangle if found, otherwise an empty Rect.
         """
 
-        page_rect = cast(Rect, self._page(0).rect)
-        search_rect = Rect(
-            page_rect.x0,
-            page_rect.y1 - page_rect.height * self.FOOTER_MAX_FRACTION,
-            page_rect.x1,
-            page_rect.y1,
-        )
-
-        common = self._repeating_rects_in(search_rect, is_header=False)
-        if not common:
-            logger.debug(f"Footer rectangle not found for {self}.")
-            return Rect()
-        search_rect.y0 = min(rect.y0 for rect in common)
-        return search_rect
+        return self._running_band(is_header=False)
 
     @cached_property
     def _running_matter_rects(self) -> frozenset[tuple[float, float, float, float]]:
@@ -4225,7 +4233,9 @@ class ArticlePDF:
             elif result.endswith("-"):
                 w1_match = word_end_pattern.search(result[:-1])
                 w2_match = word_start_pattern.match(text)
-                keep_hyphen = keep_hyphens or (
+                # A dash separated from the preceding span (e.g. a subscript
+                # in a panel range) isn't splitting a word at the line break.
+                keep_hyphen = keep_hyphens or result.endswith(" -") or (
                     w1_match is not None
                     and w2_match is not None
                     and (w1_match.group(0).lower(), w2_match.group(0).lower())

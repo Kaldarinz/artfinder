@@ -42,6 +42,19 @@ def test_all_layers_use_figure_page_geometry(tmp_path: Path, rotation: int) -> N
                     assert (layer.pixel(x, y) == color) == (full.pixel(x, y) == color)
 
 
+def test_srep32631_exports_match_source_images(tmp_path: Path) -> None:
+    """Each exported SI figure matches the entire placed image on its source page."""
+    pdf = Path(__file__).parent / "article_pdfs" / "10.1038_srep32631_si.pdf"
+    with ArticlePDF(pdf) as article:
+        paths = article.extract_figures(output_path=tmp_path, dpi=72)
+        for page_no, labels in enumerate((("S1", "S2"), ("S3", "S4", "S5"), ("S6", "S7")), start=1):
+            page = article.file[page_no]
+            for label, image in zip(labels, page.get_image_info(), strict=True):
+                source = page.get_pixmap(dpi=72, clip=Rect(image["bbox"]))
+                png = Pixmap(str(paths[label]))
+                assert (png.width, png.height, png.digest) == (source.width, source.height, source.digest), label
+
+
 def test_empty_layers_allocate_no_scratch_pages(tmp_path: Path) -> None:
     """A vectors-only figure needs one scratch document, not one per layer."""
     with pymupdf.open() as doc:
