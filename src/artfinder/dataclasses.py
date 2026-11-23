@@ -683,6 +683,8 @@ class FigureCaptionPDF:
 class FigurePDF:
     rect: Rect
     caption: FigureCaptionPDF
+    preceding_parts: tuple[tuple[int, Rect], ...] = ()
+    """Earlier physical page indices and crops, in reading order. `rect` is the primary crop."""
 
 
 @dataclass

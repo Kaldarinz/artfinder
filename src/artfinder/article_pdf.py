@@ -29,7 +29,7 @@ from pathlib import Path
 from shutil import copymode, which
 from statistics import median
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, TypeVar, cast
 from warnings import warn
 
 import numpy as np
@@ -48,6 +48,7 @@ else:
     from pymupdf import Page
 
 from artfinder._raster_captions import read_raster_caption
+from artfinder._split_figures import PanelMark, continues_panel_sequence
 from artfinder.dataclasses import (
     DocumentElementsPDF,
     DrawingObjectPDF,
@@ -74,6 +75,17 @@ _FigureLayer = Literal["figure", "vectors", "image", "text"]
 _InlinePayloads = dict[int, tuple[bytes, bytes | None]]
 # PyMuPDF exports its encryption constants dynamically.
 _KEEP_ENCRYPTION: int = getattr(pymupdf, "PDF_ENCRYPT_KEEP")
+
+
+class _RenderCrop(NamedTuple):
+    page: Page
+    figure: FigurePDF
+    clip: Rect  # Displayed page coordinates, shared by all output layers.
+
+
+class _StackLayout(NamedTuple):
+    bounds: pymupdf.IRect
+    origins: list[tuple[int, int]]
 
 
 class ArticlePDF:
@@ -110,6 +122,8 @@ class ArticlePDF:
     "Precidion digits for clipping rects coordinates."
     MAX_IMAGE_AREA = 0.8
     "Maximum fraction of page area for an image to be considered valid."
+    FIGURE_PART_GAP = 6.0
+    "White gap in points between page fragments in a split-figure PNG."
     POINTS_PER_INCH = 72
     "Points in an inch, the unit PDF coordinates are given in."
     MIN_FIGURE_DPI = 150
@@ -387,9 +401,13 @@ class ArticlePDF:
         )
         """Figure rectangles found from their graphics, keyed by page number,
         then by the index of their caption among the page's figure captions."""
-        self._figures_cache: dict[int, tuple[FigurePDF, ...]] = KeyedDict(
+        self._local_figures_cache: dict[int, tuple[FigurePDF, ...]] = KeyedDict(
             self._get_figures_from_page
         )
+        self._panel_marks: dict[int, tuple[PanelMark, ...]] = KeyedDict(self._panel_marks_on_page)
+        # Anchor page -> local caption index and the extra crop on the page before.
+        self._split_figures: dict[int, tuple[int, Rect] | None] = KeyedDict(self._split_figure)
+        self._figures_cache: dict[int, tuple[FigurePDF, ...]] = KeyedDict(self._figures_with_parts)
         """Figures keyed by page number."""
         self._tables_cache: dict[int, tuple[TablePDF, ...]] = KeyedDict(
             self._get_tables_from_page
@@ -1317,9 +1335,39 @@ class ArticlePDF:
         copy_rects: bool = True,
     ) -> list[Rect]:
 
-        return self._get_rects_by_type(
-            rect_type="_figures", page_no=page_no, clip=clip, copy_rects=copy_rects
-        )
+        """Return physical crops, including preceding panels on the requested page.
+
+        Parameters
+        ----------
+        page_no : Page | int | None
+            Physical page to inspect, or None for all pages in reading order.
+        clip : Rect | None
+            Keep only parts contained in this rectangle on their respective pages.
+        copy_rects : bool
+            Return independent rectangles rather than references to cached bounds.
+
+        Returns
+        -------
+        list[Rect]
+            One rectangle per figure part on the selected pages.
+        """
+        if isinstance(page_no, Page):
+            page_no = cast(int, page_no.number)
+        pages = range(self.file.page_count) if page_no is None else (page_no,)
+        result: list[Rect] = []
+        for index in pages:
+            rects = [f.rect for f in self._figures_cache[index]]
+            anchor = index + 1
+            if anchor < self.file.page_count and (
+                anchor in self._figures_cache or self._split_figures[anchor] is not None
+            ):
+                # Detection uses local geometry, but public marks and exports
+                # must both see edits to the resolved figure's parts.
+                rects.extend(rect for f in self._figures_cache[anchor]
+                             for n, rect in f.preceding_parts if n == index)
+            result.extend(copy(rect) if copy_rects else rect for rect in rects
+                          if clip is None or clip.contains(rect))
+        return result
 
     def get_figures(
         self,
@@ -1328,7 +1376,7 @@ class ArticlePDF:
         copy_figures: bool = False,
     ) -> dict[str, FigurePDF]:
         """
-        Get figures from the document.
+        Get logical figures by their primary page; earlier panels are in `preceding_parts`.
 
         Parameters
         ----------
@@ -2540,7 +2588,10 @@ class ArticlePDF:
         dpi: int | Literal["auto"] = "auto",
     ) -> dict[str, Path]:
         """
-        Extract a specific figure as a separate images.
+        Export one PNG per figure, stacking split figures in page order at one scale.
+
+        A page selection refers to the primary crop, not an earlier panel page.
+        Earlier parts are included even when exporting only that primary page.
 
         Parameters
         ----------
@@ -2616,27 +2667,84 @@ class ArticlePDF:
         # Duplicate labels can put figures out of physical page order. Keep a
         # page's inline bytes only until its final selected figure is rendered.
         inline_images: dict[int, _InlinePayloads] = KeyedDict(self._inline_image_payloads)
-        last_on_page = {n: label for label, (n, _) in figures.items()} if "image" in layers else {}
+        selected = {label: tuple(self._figure_fragments(n, f)) for label, (n, f) in figures.items()}
+        last_on_page = {n: label for label, parts in selected.items() for n, _ in parts
+                        } if "image" in layers else {}
         paths: dict[str, Path] = {}
-        for label, (page_no, figure) in figures.items():
-            resolution = self._figure_dpi(page_no, figure) if dpi == "auto" else dpi
+        for label, fragments in selected.items():
+            resolution = max(self._figure_dpi(n, f) for n, f in fragments) if dpi == "auto" else dpi
+            crops = [self._render_crop(n, f) for n, f in fragments]
+            stack = self._stack_layout(crops, resolution) if len(crops) > 1 else None
             for part in layers:
-                pixmap = self._figure_layer_pixmap(
-                    part, page_no, figure, resolution, highlight_white, inline_images
-                )
+                if stack is None:
+                    pixmap = self._figure_layer_pixmap(
+                        part, crops[0], resolution, highlight_white, inline_images
+                    )
+                else:
+                    pixmap = self._stacked_figure_layer(
+                        part, crops, stack, resolution, highlight_white, inline_images
+                    )
                 if pixmap is None:
                     continue
                 suffix = "" if part == "figure" else f"_{part}"
                 path = directory / f"{self.identifier}_fig_{label}{suffix}.png"
                 pixmap.save(path, output="PNG")
+                del pixmap  # Do not hold this canvas while building the next layer.
                 if part == layer:
                     paths[label] = path
-            if inline_images and last_on_page[page_no] == label:
-                inline_images.pop(page_no, None)
+            for n, _ in fragments:
+                if last_on_page.get(n) == label:
+                    inline_images.pop(n, None)
         return paths
 
+    @staticmethod
+    def _figure_fragments(page_no: int, figure: FigurePDF) -> Iterator[tuple[int, FigurePDF]]:
+        """Yield each page-local crop of the selected figure, in reading order."""
+        for n, rect in figure.preceding_parts:
+            yield n, FigurePDF(rect, figure.caption)
+        yield page_no, figure
+
+    def _render_crop(self, page_no: int, figure: FigurePDF) -> _RenderCrop:
+        """Resolve a fragment's physical page and displayed clip once per export."""
+        page = self._page(page_no)
+        return _RenderCrop(page, figure, figure.rect * page.rotation_matrix)
+
+    def _stack_layout(self, crops: list[_RenderCrop], dpi: int) -> _StackLayout:
+        """Place the displayed crops on a common pixel grid for all output layers."""
+        scale = dpi / self.POINTS_PER_INCH
+        matrix = pymupdf.Matrix(scale, scale)
+        boxes = [((crop.clip & crop.page.rect) * matrix).irect for crop in crops]
+        gap = max(1, round(self.FIGURE_PART_GAP * scale))
+        width = max(box.width for box in boxes)
+        height = sum(box.height for box in boxes) + gap * (len(boxes) - 1)
+        origins = []
+        y = 0
+        for box in boxes:
+            origins.append(((width - box.width) // 2, y))
+            y += box.height + gap
+        return _StackLayout(pymupdf.IRect(0, 0, width, height), origins)
+
+    def _stacked_figure_layer(
+        self, layer: _FigureLayer, crops: list[_RenderCrop], stack: _StackLayout, dpi: int,
+        highlight_white: bool, inline_images: dict[int, _InlinePayloads],
+    ) -> Pixmap | None:
+        """Render one crop at a time, leaving missing components' slots blank."""
+        canvas: Pixmap | None = None
+        for crop, origin in zip(crops, stack.origins, strict=True):
+            pixels = self._figure_layer_pixmap(layer, crop, dpi, highlight_white, inline_images)
+            if pixels is None:
+                continue
+            if canvas is None:
+                canvas = Pixmap(pymupdf.csRGB, stack.bounds, False)
+                canvas.clear_with(255)
+                canvas.set_dpi(dpi, dpi)
+            pixels.set_origin(*origin)
+            canvas.copy(pixels, pixels.irect)
+            del pixels  # Release this source before rendering the next crop.
+        return canvas
+
     def _figure_layer_pixmap(
-        self, layer: _FigureLayer, page_no: int, figure: FigurePDF, dpi: int,
+        self, layer: _FigureLayer, crop: _RenderCrop, dpi: int,
         highlight_white: bool, inline_images: dict[int, _InlinePayloads],
     ) -> Pixmap | None:
         """Render a figure or one of its layers in the physical page's orientation.
@@ -2645,10 +2753,8 @@ class ArticlePDF:
         ----------
         layer : _FigureLayer
             Whole figure or the component layer to render.
-        page_no : int
-            Physical page of the selected figure.
-        figure : FigurePDF
-            Figure in unrotated page coordinates.
+        crop : _RenderCrop
+            Physical page, unrotated figure geometry, and displayed clip.
         dpi : int
             Output resolution.
         highlight_white : bool
@@ -2661,8 +2767,8 @@ class ArticlePDF:
         Pixmap | None
             Cropped pixels in displayed coordinates, or None for an empty layer.
         """
-        source = self._page(page_no)
-        clip = figure.rect * source.rotation_matrix
+        source, figure, clip = crop
+        page_no = source.number
         if layer == "figure":
             return source.get_pixmap(dpi=dpi, clip=clip)
 
@@ -2863,7 +2969,9 @@ class ArticlePDF:
             if clip is None or clip.contains(rect):
                 result.append(copy(rect) if copy_rects else rect)
         if rect_type in {"_figure_captions", "_table_captions"}:
-            for captions in req_blocks.values():
+            # _join_caption_pages only carries a caption to the very next page.
+            openings = req_blocks.values() if page_no is None else (req_blocks.get(page_no - 1, ()),)
+            for captions in openings:
                 for caption in captions:
                     for continuation_page, rect in caption.continuations:
                         if page_no is not None and continuation_page != page_no:
@@ -2934,8 +3042,9 @@ class ArticlePDF:
             warn("No figures found to extract.")
         return [
             component
-            for page, figure in figures.values()
-            for component in self._components_in_figure(figure, cache[page], copy_objects)
+            for primary, figure in figures.values()
+            for page, fragment in self._figure_fragments(primary, figure)
+            for component in self._components_in_figure(fragment, cache[page], copy_objects)
         ]
 
     @staticmethod
@@ -6168,6 +6277,107 @@ class ArticlePDF:
                     grown = True
 
         return {index: figure.rect for index, figure in figures.items()}
+
+    def _panel_marks_on_page(self, page_no: int) -> tuple[PanelMark, ...]:
+        """Read standalone parenthesized panel letters; never infer them from prose."""
+        return tuple(
+            (match[1].lower(), line.rect)
+            for block in self._text_cache[page_no] for line in block.lines
+            if (match := re.fullmatch(r"\(([A-Za-z])\)", line.text.strip())) and line.rotation == 0
+        )
+
+    def _split_barriers(self, page_no: int) -> list[Rect]:
+        """Collect assigned content which a cross-page figure cannot cross or claim."""
+        return [*self.get_paragraph_rects(page_no, copy_rects=False),
+                *self.get_table_rects(page_no, copy_rects=False),
+                *self.get_table_caption_rects(page_no, copy_rects=False),
+                *self.get_figure_caption_rects(page_no, copy_rects=False),
+                *(f.rect for f in self._local_figures_cache[page_no])]
+
+    def _split_figure(self, page_no: int) -> tuple[int, Rect] | None:
+        """Find an unclaimed panel sequence continued by a leading figure on this page.
+
+        Parameters
+        ----------
+        page_no : int
+            Candidate anchor page (zero-based). Only the adjacent boundary is examined.
+
+        Returns
+        -------
+        tuple[int, Rect] | None
+            Local caption index and preceding page crop, if ownership is unambiguous.
+        """
+        prev = page_no - 1
+        if prev < 0 or not self._figure_captions_cache[page_no]:
+            return None
+        marks = self._panel_marks[page_no]
+        if not any(letter != "a" for letter, _ in marks):
+            return None
+        previous_marks = self._panel_marks[prev]
+        if not any(letter == "a" for letter, _ in previous_marks):
+            return None
+        candidates = []
+        for idx, rect in self._figure_matches_cache[page_no].items():
+            if rect.y1 > self._figure_captions_cache[page_no][idx].rect.y0 + self.MARGIN:
+                continue
+            inside = [(letter, box) for letter, box in marks if rect.contains(box)]
+            if inside and not any(letter == "a" for letter, _ in inside):
+                candidates.append((idx, rect, inside))
+        if not candidates:
+            return None
+
+        # Everything above the caption-page crop must be running matter. This
+        # rules out side-by-side contenders as well as a separate figure above.
+        barriers = self._split_barriers(page_no)
+        leaders = [(idx, rect, inside) for idx, rect, inside in candidates
+                   if not any(b != rect and b.y0 < rect.y1 for b in barriers)
+                   and not any(c.rect.y0 < rect.y1 and not rect.contains(c.rect)
+                               for c in self._figure_clusters_cache[page_no])]
+        if len(leaders) != 1:
+            return None
+        idx, rect, after = leaders[0]
+        if self._has_outside_panel_text(page_no, [rect], top=-inf, bottom=rect.y1):
+            return None
+
+        boundary = max((r.y1 for r in self._split_barriers(prev)), default=-inf)
+        trailing = [c.rect for c in self._figure_clusters_cache[prev] if c.rect.y0 >= boundary]
+        if not trailing:
+            return None
+        before: list[PanelMark] = []
+        crop = Rect()
+        for cluster in trailing:
+            labels = [mark for mark in previous_marks if cluster.contains(mark[1])]
+            if not labels:
+                return None
+            before.extend(labels)
+            crop.include_rect(cluster)
+        if (not continues_panel_sequence(before, after)
+                or self._has_outside_panel_text(prev, trailing, top=crop.y0, bottom=inf)
+                or any(c.rect.y0 < boundary and c.rect.intersects(crop)
+                       for c in self._figure_clusters_cache[prev])):
+            return None
+        return idx, crop
+
+    def _has_outside_panel_text(
+        self, page_no: int, parts: list[Rect], *, top: float, bottom: float
+    ) -> bool:
+        """Check the proposed run to the page break for text outside its panels."""
+        return any(
+            top < line.rect.y1 and line.rect.y0 < bottom
+            and not any(part.contains(line.rect) for part in parts)
+            for block in self._text_cache[page_no] if not self._is_running_matter(block.rect)
+            for line in block.lines
+        )
+
+    def _figures_with_parts(self, page_no: int) -> tuple[FigurePDF, ...]:
+        """Attach an earlier crop without registering a duplicate figure label."""
+        figures = self._local_figures_cache[page_no]
+        if not figures or (split := self._split_figures[page_no]) is None:
+            return figures
+        idx, rect = split
+        caption = self._figure_captions_cache[page_no][idx]
+        return tuple(replace(f, preceding_parts=((page_no - 1, rect),))
+                     if f.caption is caption else f for f in figures)
 
     def _get_figures_from_page(
         self,

@@ -61,6 +61,22 @@ af = artfinder.Artfinder()
 af.find_article(doi='10.1021/acs.chemrev.6b00468')
 ```
 
+### Mark and export figures
+
+```python
+from artfinder.article_pdf import ArticlePDF
+
+with ArticlePDF("supplement.pdf") as pdf:
+    pdf.mark("figures", output_path="out")
+    pngs = pdf.extract_figures(output_path="out")  # one PNG per figure label
+```
+
+When a sequence of panel letters such as (a–d) continues as (e–f) on the
+next page, each page is marked separately. The PNG stacks the crops at one
+scale with a white gap. Detection requires extractable panel letters and
+an unambiguous match; it does not guess from graphics alone. A page-scoped
+export selects by the primary crop’s page and includes its earlier panels.
+
 ## License
 
 `artfinder` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.

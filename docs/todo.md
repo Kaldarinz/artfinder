@@ -6,13 +6,6 @@ it has to be rediscovered.
 
 ## Known defects
 
-### One rectangle cannot capture figure panels on two pages
-
-In `10.1021_acsomega.5c05967_si.pdf`, S3 panels (a–d) are on page 4 and
-(e–f) on page 5; S4 panel (a) is on page 5 and (b) on page 6. The S3 and S4
-rectangle goldens describe the panels on the caption page only. Exporting all
-panels would require tracking more than one page and rectangle per figure.
-
 ### `line_pitch` is wrong where a block holds more than one line per row
 
 `line_pitch` is the median gap between consecutive lines *inside* a text block.
