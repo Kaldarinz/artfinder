@@ -1,4 +1,22 @@
 {
+    "10.1021_acsomega.5c04247_si.pdf": {
+        "S1": "Image of the AgNPs in CB suspension.",
+        "S2": "Absorbance spectrum of Ag NPs film deposited by drop casting method onto a quartz substrate(~ 100 nm thickness). Inset: the absorbance spectrum acquired from Ag NPs in CB suspension.",
+        "S3": "Size distribution of the AgNPs suspension obtained by dynamic light scattering (DLS).",
+        "S4": "Side-view height profiles of the a) ITO/PEDOT:PSS and b) ITO/PEDOT:PSS/AgNPs samples extracted from AFM topography images. Grey traces show the 128 individual line scans recorded for each configuration, and the red solid line represents their mean profile.",
+        "S5": "a) SEM micrograph of the AgNPs/polystyrene (10 wt %) film and the corresponding EDS elemental maps of b) oxygen and c) silver for the same area. (d, e) Enlarged views of the region marked by the red circle.",
+        "S6": "Surface potential images obtained from ITO/PEDOT:PSS and ITO/PEDOT:PSS/Ag NPs thin films by using the Kelvin Probe method.",
+        "S7": "UV-VIS transmittance spectra of PEDOT:PSS and PEDOT:PSS/AgNPs.",
+        "S8": "Exciton-generation profile G (x) calculated by transfer-matrix modelling (TMM) for the stack ITO (130 nm)/X/PM6:Y6 (100nm)/PFN-Br (5 nm)/Ag (100 nm), where X = PEDOT:PSS (38 nm) either without or with an 8 nm AgNPs interlayer. The absorption coefficient (α) of the AgNPs film was extracted from its absorbance spectrum, and the corresponding extinction coefficient (k) was derived from transmittance spectra following the procedure detailed in reference [1]. The simulations were performed with the OghmaNano software [2].",
+        "S9": "J-V curves acquired under illumination at the AM1.5G condition for the ITO (130 nm)/PEDOT:PSS (30 nm)/ PM6:Y6 (100 nm)/ PFN-Br (5nm)/Ag (120nm) devices. The plot compares the performance of PM6 used in this work (provided by LUMTEC, GPC M w = 29 kDa) and other PM6 with higher Molecular Mass (Mw) (provided by Solarmer, GPC M w = 113 kDa).",
+        "S10": "Photovoltaic parameters obtained for the ITO/X/PM6:Y6/PDINN/Ag devices, where X= Br-2PACz or Br-2PACz/AgNPs.",
+        "S11": "a) Topography and b) surface potential of ITO/Br-2PACz substrates, obtained by AFM and Kelvin Probe method.",
+        "S12": "Light intensity dependence of photovoltaic parameters a) J SC and b) V OC for SC and AgNPs-SC devices.",
+        "S13": "Stability of organic photovoltaic devices (a) Normalized V oc, b) Normalized J sc, c) Normalized FF and d) Normalized PCE over Time. Under air and dark conditions with RH 65–85% over 3 hours of exposure.",
+        "S14": "Normalized Photovoltaic Parameters, of cells with and without the AgNPs layer, in fresh state (0h) and after 1600 h and 3200 h of storage in dark conditions in glovebox N2 atmosphere (~ 3 ppm of moisture and O 2).",
+        "S15": "TPV, TPC and Photo-CELIV experimental apparatus.",
+        "S16": "Voltage ramp applied during the Photo-CELIV measurements and the scheme of the recorded electric current."
+    },
     "10.1021_acsomega.2c02316.pdf": {
         "1": "(a) Sketch showing the PLAL synthesis protocol. (b) Tyndall e ﬀ ect observed on the colloid synthesized by PLAL at 1000 Hz. The left solution is the solvent, i.e., DI water, while the right solution is the colloid containing the TeO 2 NPs. (c) Scanning electron microscopy (SEM) image of the TeO 2 NPs contained in the colloid synthesized by PLAL at 1000 Hz. (d) Energy-dispersive X-ray (EDX) line scan through one TeO 2 particle.",
         "2": "(a) XRD spectra. The peak positions of Te and α -TeO 2 were obtained from the crystallography open database entries 1011098 and 1530871, respectively. (b) Raman spectra.",

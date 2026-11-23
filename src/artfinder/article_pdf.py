@@ -2050,7 +2050,13 @@ class ArticlePDF:
                 if self._is_title_like(text):
                     candidates.append((size, text))
         if not candidates:
-            return None
+            # On some SI covers only the standalone SI heading is enlarged.
+            # Look above it, never below it among section titles and captions.
+            heading_top = min((
+                line.rect.y0 for lines in lines_by_font.values() for line in lines
+                if self.SUPPLEMENT_HEADING_PATTERN.fullmatch(line.text.strip())
+            ), default=None)
+            return self._bold_opening_title(heading_top) if heading_top is not None else None
         largest = max(size for size, _ in candidates)
         return max(
             (
@@ -2060,6 +2066,44 @@ class ArticlePDF:
             ),
             key=len,
         )
+
+    def _bold_opening_title(self, heading_top: float) -> str | None:
+        """Read a body-sized title distinguished only by bold type on an SI cover.
+
+        Parameters
+        ----------
+        heading_top : float
+            Top of the prominent, standalone supplementary heading on page one.
+
+        Returns
+        -------
+        str | None
+            Title if the page opens with a title-like run in bold, else None.
+        """
+        header = self.header_rect
+        lines = sorted((
+            line for block in self._text_cache[0]
+            if (header.is_empty or block.rect.y1 > header.y1)
+            and not self._is_running_matter(block.rect)
+            for line in block.lines
+            if line.rotation == 0 and line.rect.y1 <= heading_top and line.text.strip()
+        ), key=lambda line: (line.rect.y0, line.rect.x0))
+        opening: list[TextLinePDF] = []
+        opening_font: tuple[str, float] | None = None
+        for line in lines:
+            if not all(span.flags & pymupdf.TEXT_FONT_BOLD for span in line.spans if span.text.strip()):
+                break
+            font = self._block_font(TextBlockPDF(rect=line.rect, lines=[line]))
+            if font is None or abs(font[1] - self.body_font[1]) > self.FONT_SIZE_TOLERANCE:
+                break
+            if opening_font is not None and font != opening_font:
+                break
+            opening_font = font
+            opening.append(line)
+        if opening_font is None:
+            return None
+        group = self._title_line_groups(opening, opening_font[1])[0]
+        return self._clean_metadata_title(self._join_caption_lines(group, keep_hyphens=True))
 
     def _title_line_groups(
         self, lines: list[TextLinePDF], size: float
@@ -4464,6 +4508,17 @@ class ArticlePDF:
                         block = block + next_block
                         text = block.text.strip()
                         match = pattern.match(text)
+                if match and i and ")" in match.group():
+                    # A wrapped reference can open a block: '(see circuit –' /
+                    # 'Fig. S9) and ...'. The parenthesis belongs to the line above.
+                    previous = text_blocks[i - 1].lines[-1]
+                    first = block.lines[0]
+                    if (
+                        previous.text.rfind("(") > previous.text.rfind(")")
+                        and abs(previous.rect.x0 - first.rect.x0) <= self.MARGIN
+                        and 0 <= first.rect.y0 - previous.rect.y1 <= previous.rect.height
+                    ):
+                        match = None
                 if match:
                     # Some paragraphs can also begin with `pattern`, but in almost all cases
                     # font or size of the opening differs from body text.
