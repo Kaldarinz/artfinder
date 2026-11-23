@@ -10,6 +10,7 @@ import pytest
 from pymupdf import Pixmap, Rect
 
 from artfinder.article_pdf import ArticlePDF, Page
+from tests.pdf_assertions import assert_stacked_png
 
 
 SI = Path(__file__).parent / "article_pdfs" / "10.1021_acsomega.5c05967_si.pdf"
@@ -75,19 +76,7 @@ def test_png_stacks_the_original_page_pixels(tmp_path: Path, label: str) -> None
         parts = [article.file[i].get_pixmap(dpi=96, clip=r)
                  for i, r in (*f.preceding_parts, (n + 1, f.rect))]
     assert list(tmp_path.iterdir()) == [png]
-    out = Pixmap(str(png))
-    assert out.width == max(p.width for p in parts)
-    assert out.height == sum(p.height for p in parts) + 8  # 6 pt at 96 DPI
-    pixels = bytearray(b"\xff" * (out.stride * out.height))
-    top = 0
-    for p in parts:
-        left = (out.width - p.width) // 2
-        data = p.samples
-        for row in range(p.height):
-            start = (top + row) * out.stride + 3 * left
-            pixels[start:start + p.stride] = data[row * p.stride:(row + 1) * p.stride]
-        top += p.height + 8
-    assert out.samples == pixels
+    assert_stacked_png(png, parts, gap=8)  # 6 pt at 96 DPI
 
 
 def _panel_pdf(case: str, *, rotate_first: bool = False) -> bytes:

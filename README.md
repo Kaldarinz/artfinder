@@ -72,10 +72,11 @@ with ArticlePDF("supplement.pdf") as pdf:
 ```
 
 When a sequence of panel letters such as (a–d) continues as (e–f) on the
-next page, each page is marked separately. The PNG stacks the crops at one
-scale with a white gap. Detection requires extractable panel letters and
-an unambiguous match; it does not guess from graphics alone. A page-scoped
-export selects by the primary crop’s page and includes its earlier panels.
+next page, each page is marked separately. A repeated caption such as
+`Figure 8. (continued)` also links crops on consecutive pages, even when the
+panel letters are part of an image. The descriptive caption stays on its
+original page. A page-scoped export selects by the primary crop’s page and
+stacks all linked crops in reading order at one scale with a white gap.
 
 ## License
 

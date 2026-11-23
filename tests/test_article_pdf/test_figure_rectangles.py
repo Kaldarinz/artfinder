@@ -24,8 +24,12 @@ EXPECTED_RECTANGLES: dict[str, dict[str, list[float]]] = json.loads(
 )
 
 # Sparse: every unlisted figure is expected to occupy only its primary page.
-EXPECTED_PARTS: dict[str, dict[str, list[tuple[int, list[float]]]]] = json.loads(
+PartBounds = dict[str, dict[str, list[tuple[int, list[float]]]]]
+PRECEDING_PARTS: PartBounds = json.loads(
     (TEST_PDFS_DIR / "preceding_figure_parts.json").read_text(encoding="utf-8")
+)
+FOLLOWING_PARTS: PartBounds = json.loads(
+    (TEST_PDFS_DIR / "following_figure_parts.json").read_text(encoding="utf-8")
 )
 
 
@@ -100,14 +104,16 @@ class TestFigureRectangles:
         with ArticlePDF(pdf_path) as article:
             figures = article.figures
             assert set(figures) == set(expected)
-            parts = EXPECTED_PARTS.get(pdf_name, {})
-            assert {k for k, f in figures.items() if f.preceding_parts} == set(parts)
-            for label, earlier in parts.items():
-                for (page, rect), (wanted_page, bounds) in zip(
-                    figures[label].preceding_parts, earlier, strict=True
-                ):
-                    assert page == wanted_page
-                    assert (rect.x0, rect.y0, rect.x1, rect.y1) == approx(bounds, abs=0.01)
+            for actual, golden in (
+                ({k: f.preceding_parts for k, f in figures.items() if f.preceding_parts}, PRECEDING_PARTS),
+                ({k: f.following_parts for k, f in figures.items() if f.following_parts}, FOLLOWING_PARTS),
+            ):
+                parts = golden.get(pdf_name, {})
+                assert actual.keys() == parts.keys()
+                for label, sequence in parts.items():
+                    for (page, rect), (wanted_page, bounds) in zip(actual[label], sequence, strict=True):
+                        assert page == wanted_page
+                        assert tuple(rect) == approx(bounds, abs=0.01)
             for fig_label, expected_rect in expected.items():
                 assert tuple(figures[fig_label].rect) == approx(
                     tuple(expected_rect), abs=2 if raster else None

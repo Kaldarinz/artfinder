@@ -685,6 +685,8 @@ class FigurePDF:
     caption: FigureCaptionPDF
     preceding_parts: tuple[tuple[int, Rect], ...] = ()
     """Earlier physical page indices and crops, in reading order. `rect` is the primary crop."""
+    following_parts: tuple[tuple[int, Rect], ...] = ()
+    """Later crops with an explicit continuation caption, in reading order."""
 
 
 @dataclass

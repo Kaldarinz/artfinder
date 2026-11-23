@@ -224,6 +224,7 @@ class ArticlePDF:
     holds the numeric components, and `supp` and `suffix` mark supplementary
     figures. A label run into a letter is not an opening: `Figure 1a shows`
     can be a body reference. See `_caption_opening` for separately captioned panels."""
+    _CONTINUED_CAPTION = re.compile(r"(?:\(\s*continued\.?\s*\)|continued)\.?", re.I)
     # Keep trailing S reserved for supplementary figures, not panel letters.
     _PANEL_CAPTION_PATTERN = re.compile(
         rf"{_FIGURE_CAPTION_START}{_CAPTION_NUMBER_PATTERN}"
@@ -407,6 +408,17 @@ class ArticlePDF:
         self._panel_marks: dict[int, tuple[PanelMark, ...]] = KeyedDict(self._panel_marks_on_page)
         # Anchor page -> local caption index and the extra crop on the page before.
         self._split_figures: dict[int, tuple[int, Rect] | None] = KeyedDict(self._split_figure)
+        # Only pages involved in explicit continuations need label indices.
+        self._caption_indices: dict[int, dict[str, int]] = KeyedDict(self._caption_indices_on_page)
+        # Published figure and original tuple: the detected page crop remains
+        # authoritative unless the caller explicitly replaces that tuple.
+        self._continued_owners: dict[
+            tuple[int, str], tuple[FigurePDF, tuple[tuple[int, Rect], ...]]
+        ] = {}
+        # Continued label -> (original caption page, crop on this page).
+        self._continued_parts: dict[int, dict[str, tuple[int, Rect]]] = KeyedDict(
+            self._continued_parts_on_page
+        )
         self._figures_cache: dict[int, tuple[FigurePDF, ...]] = KeyedDict(self._figures_with_parts)
         """Figures keyed by page number."""
         self._tables_cache: dict[int, tuple[TablePDF, ...]] = KeyedDict(
@@ -1062,7 +1074,8 @@ class ArticlePDF:
     @cached_property
     def figure_count(self) -> int:
         """Number of figures in the document."""
-        return sum(len(captions) for captions in self._figure_captions_cache.values())
+        return sum(len(captions) - len(self._continued_parts[n])
+                   for n, captions in self._figure_captions_cache.items())
 
     # Public methods
 
@@ -1343,7 +1356,7 @@ class ArticlePDF:
         copy_rects: bool = True,
     ) -> list[Rect]:
 
-        """Return physical crops, including preceding panels on the requested page.
+        """Return physical crops, including panels anchored on another page.
 
         Parameters
         ----------
@@ -1364,7 +1377,16 @@ class ArticlePDF:
         pages = range(self.file.page_count) if page_no is None else (page_no,)
         result: list[Rect] = []
         for index in pages:
-            rects = [f.rect for f in self._figures_cache[index]]
+            figures = self._figures_cache.get(index)
+            if figures is None:
+                figures = self._primary_figures_on_page(index)
+            rects = [f.rect for f in figures]
+            for label, (owner, crop) in self._continued_parts[index].items():
+                published = self._continued_owners.get((owner, label))
+                if published is None or published[0].following_parts is published[1]:
+                    rects.append(crop)  # Same object as the detected part, even after in-place edits.
+                else:  # Respect a caller's replacement, including removed or rearranged parts.
+                    rects.extend(rect for n, rect in published[0].following_parts if n == index)
             anchor = index + 1
             if anchor < self.file.page_count and (
                 anchor in self._figures_cache or self._split_figures[anchor] is not None
@@ -1384,7 +1406,7 @@ class ArticlePDF:
         copy_figures: bool = False,
     ) -> dict[str, FigurePDF]:
         """
-        Get logical figures by their primary page; earlier panels are in `preceding_parts`.
+        Get logical figures by primary page, with earlier and later crops in page order.
 
         Parameters
         ----------
@@ -2711,6 +2733,8 @@ class ArticlePDF:
         for n, rect in figure.preceding_parts:
             yield n, FigurePDF(rect, figure.caption)
         yield page_no, figure
+        for n, rect in figure.following_parts:
+            yield n, FigurePDF(rect, figure.caption)
 
     def _render_crop(self, page_no: int, figure: FigurePDF) -> _RenderCrop:
         """Resolve a fragment's physical page and displayed clip once per export."""
@@ -5849,7 +5873,7 @@ class ArticlePDF:
         gutter = self._column_gutter_middle(page_no)
         table_rects = self.get_table_rects(page_no, copy_rects=False)
         labels = [
-            (block, line.rect)
+            (block, line)
             for block in self._text_cache[page_no]
             if self._is_figure_label(block, caption_rects, paragraph_rects)
             for line in block.lines
@@ -5861,12 +5885,19 @@ class ArticlePDF:
         # another cluster: a few rounds settle it.
         for _ in range(3):
             added = False
-            for block, rect in labels:
+            for block, line in labels:
+                rect = line.rect
                 for cluster in clusters:
                     if cluster.reach.contains(rect):
                         cluster.rect.include_rect(rect)
                         break
-                    if self._gap_between(cluster.reach, rect) > self.FIGURE_LABEL_GAP:
+                    gap_limit = self.FIGURE_LABEL_GAP
+                    # A rotated y-axis title may sit more than 15 pt outside the
+                    # tick labels. Allow 1.5 line heights only beside the plot.
+                    if (line.dir[0] == 0 and cluster.reach.y0 <= rect.y0
+                            and rect.y1 <= cluster.reach.y1):
+                        gap_limit = max(gap_limit, 1.5 * rect.width)
+                    if self._gap_between(cluster.reach, rect) > gap_limit:
                         continue
                     if self._across_column_gutter(cluster.reach, rect, gutter):
                         continue
@@ -6379,15 +6410,105 @@ class ArticlePDF:
             for line in block.lines
         )
 
-    def _figures_with_parts(self, page_no: int) -> tuple[FigurePDF, ...]:
-        """Attach an earlier crop without registering a duplicate figure label."""
+    def _caption_indices_on_page(self, page_no: int) -> dict[str, int]:
+        """Index labels once per candidate page; -1 marks an ambiguous label."""
+        indices: dict[str, int] = {}
+        for i, caption in enumerate(self._figure_captions_cache[page_no]):
+            indices[caption.label] = -1 if caption.label in indices else i
+        return indices
+
+    def _continued_parts_on_page(self, page_no: int) -> dict[str, tuple[int, Rect]]:
+        """Link explicit continuation captions to matched graphics on adjacent pages.
+
+        Parameters
+        ----------
+        page_no : int
+            Physical page on which to look for continuation markers.
+
+        Returns
+        -------
+        dict[str, tuple[int, Rect]]
+            Original caption page and current crop, keyed by figure label.
+        """
+        # Walk back only while a matching predecessor is itself a marker.
+        # Resolve the pending boundaries forward so a cold lookup never nests
+        # cache factories, and an orphan marker never becomes an owner.
+        pending: list[tuple[int, list[tuple[str, int, int, bool]]]] = []
+        n = page_no
+        while n > 0 and n not in self._continued_parts:
+            links = []
+            for idx, caption in enumerate(self._figure_captions_cache[n]):
+                if not self._CONTINUED_CAPTION.fullmatch(caption.text.strip()):
+                    continue
+                label = caption.label
+                prev = self._caption_indices[n - 1].get(label, -1)
+                if prev < 0 or self._caption_indices[n][label] != idx:
+                    continue
+                text = self._figure_captions_cache[n - 1][prev].text.strip()
+                extends = self._CONTINUED_CAPTION.fullmatch(text) is not None
+                links.append((label, idx, prev, extends))
+            pending.append((n, links))
+            if not any(extends for _, _, _, extends in links):
+                break
+            n -= 1
+
+        for n, links in reversed(pending):
+            parts: dict[str, tuple[int, Rect]] = {}
+            for label, idx, prev, extends in links:
+                owner = n - 1
+                if extends:
+                    prior = self._continued_parts.get(owner, {}).get(label)
+                    if prior is None:
+                        continue
+                    owner = prior[0]
+                if prev not in self._figure_matches_cache[n - 1]:
+                    continue
+                rect = self._figure_matches_cache[n].get(idx)
+                if rect is not None:
+                    parts[label] = owner, copy(rect)
+            self._continued_parts[n] = parts
+        return self._continued_parts.get(page_no, {})
+
+    def _primary_figures_on_page(self, page_no: int) -> tuple[FigurePDF, ...]:
+        """Exclude confirmed continuation markers, but not captions carried from another page."""
         figures = self._local_figures_cache[page_no]
-        if not figures or (split := self._split_figures[page_no]) is None:
+        continued = self._continued_parts[page_no]
+        if not continued:
             return figures
-        idx, rect = split
-        caption = self._figure_captions_cache[page_no][idx]
-        return tuple(replace(f, preceding_parts=((page_no - 1, rect),))
-                     if f.caption is caption else f for f in figures)
+        hidden = {id(c) for c in self._figure_captions_cache[page_no] if c.label in continued}
+        return tuple(f for f in figures if id(f.caption) not in hidden)
+
+    def _figures_with_parts(self, page_no: int) -> tuple[FigurePDF, ...]:
+        """Keep multipart figures on the primary page, with their original caption."""
+        figures = self._primary_figures_on_page(page_no)
+        if not figures:
+            return figures
+        split = self._split_figures[page_no]
+        if split is None and (
+            page_no + 1 == self.file.page_count or not self._continued_parts[page_no + 1]
+        ):
+            return figures
+        captions = self._figure_captions_cache[page_no]
+        local = {id(c) for c in captions}
+        result = []
+        for figure in figures:
+            if id(figure.caption) not in local:  # caption carried to next page
+                result.append(figure)
+                continue
+            label = figure.caption.label
+            if split is not None and figure.caption is captions[split[0]]:
+                figure = replace(figure, preceding_parts=((page_no - 1, split[1]),))
+            following = []
+            for n in range(page_no + 1, self.file.page_count):
+                part = self._continued_parts[n].get(label)
+                if part is None or part[0] != page_no:
+                    break
+                following.append((n, part[1]))
+            if following:
+                figure = replace(figure, following_parts=tuple(following))
+                self._continued_owners[page_no, label] = figure, figure.following_parts
+            result.append(figure)
+        return tuple(result)
 
     def _get_figures_from_page(
         self,
